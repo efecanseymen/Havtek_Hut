@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HAVTEK HUT v0.1</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>HAVTEK &mdash; Hareketli Uydu Terminali <small id="surum">v0.1</small></h1>
+  <div class="durum">
+    <span id="baglanti" class="rozet kotu">bagli degil</span>
+    <span id="mod" class="rozet">-</span>
+    <span id="hata" class="rozet">-</span>
+    <button id="estop" class="acil">ACIL DUR</button>
+  </div>
+</header>
+
+<nav id="sekmeler">
+  <button data-sekme="cihaz" class="aktif">Cihazlar</button>
+  <button data-sekme="motor">Motor</button>
+  <button data-sekme="sensor">Sensor</button>
+  <button data-sekme="stab">Stabilizasyon</button>
+  <button data-sekme="kayit">Kayit</button>
+  <button data-sekme="ayar">Ayarlar</button>
+</nav>
+
+<!-- ------------------------------------------------------------ cihazlar -->
+<section id="s-cihaz" class="sekme aktif">
+  <h2>Bulunan cihazlar</h2>
+  <p class="ipucu">
+    Surucu kartini kod tanimaz, yalnizca <b>hangi hatta hangi adreste</b>
+    oldugunu gorur. Hangi motorun bagli oldugunu siz secersiniz &mdash; ya da
+    IMU takiliysa "Eksen Tani" birkac adim atip hangi acinin degistigine bakar.
+    Iki surucu de 0x16 ise ikincisini <b>ikinci I2C hattina</b> (SDA 40 / SCL 39)
+    takin; lehim gerekmez.
+  </p>
+  <table id="cihaz-tablo">
+    <thead><tr><th>Hat / Adres</th><th>Tip</th><th>Rol</th><th>Yon</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <button id="tara">Hatti Tara</button>
+  <div id="i2c-liste" class="ipucu"></div>
+</section>
+
+<!-- --------------------------------------------------------------- motor -->
+<section id="s-motor" class="sekme">
+  <h2>Motor</h2>
+  <div class="satir">
+    <label>Eksen
+      <select id="m-rol"><option value="0">yatay (azimut)</option>
+                         <option value="1">dikey (elevasyon)</option></select>
+    </label>
+    <label>Jog hizi (adim/s) <input id="m-sps" type="number" value="150" min="1" max="500"></label>
+  </div>
+  <div class="satir">
+    <button id="jog-geri" class="buyuk">&#9664; Geri</button>
+    <button id="m-dur" class="buyuk">Dur</button>
+    <button id="jog-ileri" class="buyuk">Ileri &#9654;</button>
+  </div>
+  <div class="satir">
+    <label>Aciya git (derece) <input id="m-derece" type="number" value="10" step="0.25"></label>
+    <button id="m-git">Git</button>
+    <button id="m-ref">Referansi Ayarla</button>
+    <button id="m-serbest">Bobinleri Birak</button>
+  </div>
+  <div id="m-durum" class="olcum"></div>
+</section>
+
+<!-- -------------------------------------------------------------- sensor -->
+<section id="s-sensor" class="sekme">
+  <h2>Sensorler</h2>
+  <div id="sensor-olcum" class="olcum"></div>
+  <div class="satir">
+    <button id="gyro-kal">Gyro Kalibre (3 sn hareketsiz)</button>
+    <button id="mag-kal-bas">Mag Kalibrasyonu Basla</button>
+    <button id="mag-kal-bit">Bitir</button>
+  </div>
+  <p class="ipucu">
+    Gyro kalibrasyonu, sensorun dururken bile okudugu kucuk sapmayi olcup
+    cikarir. Bu yapilmazsa yaw acisi dakikalar icinde onlarca derece kayar.
+    Manyetometre kalibrasyonunda azimut eksenini yavasca bir tur dondurun.
+  </p>
+</section>
+
+<!-- ------------------------------------------------------- stabilizasyon -->
+<section id="s-stab" class="sekme">
+  <h2>Stabilizasyon <span class="uyari">deneysel</span></h2>
+  <p class="ipucu">
+    Tek eksen stabilize edilir. <b>Dikey</b> secilirse pitch, <b>yatay</b>
+    secilirse yaw korunur. Pitch yercekiminden geldigi icin once onu deneyin.
+    Acildiginda elle jog kilitlenir.
+  </p>
+  <div class="satir">
+    <label>Eksen
+      <select id="st-rol"><option value="1">dikey (pitch)</option>
+                          <option value="0">yatay (yaw)</option></select>
+    </label>
+    <label>Kontrolcu
+      <select id="st-fuzzy"><option value="1">Fuzzy-PI</option>
+                            <option value="0">sabit PI</option></select>
+    </label>
+  </div>
+  <div class="satir">
+    <button id="st-kilit">Hedefi Kilitle</button>
+    <button id="st-ac" class="buyuk">Stabilizasyonu AC</button>
+    <button id="st-kapat" class="buyuk">KAPAT</button>
+  </div>
+  <div id="st-durum" class="olcum"></div>
+  <div class="satir kucuk">
+    <label>Kp min <input data-param="kp_min" type="number" step="0.5"></label>
+    <label>Kp maks <input data-param="kp_maks" type="number" step="0.5"></label>
+    <label>Ki <input data-param="ki" type="number" step="0.1"></label>
+    <label>Hata olcek <input data-param="hata_olcek" type="number" step="0.5"></label>
+    <label>Olu bant <input data-param="olu_bant" type="number" step="0.05"></label>
+    <label>Pencere <input data-param="stab_pencere" type="number" step="1"></label>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------------- kayit -->
+<section id="s-kayit" class="sekme">
+  <h2>Kayit</h2>
+  <p class="ipucu">
+    Veri 100 Hz'de karttan akar, tarayicida birikir. Kart uzerinde dosya
+    tutulmuyor &mdash; sekmeyi kapatmadan once CSV'yi indirin.
+  </p>
+  <div class="satir">
+    <button id="log-bas">Kaydi Baslat</button>
+    <button id="log-dur">Durdur</button>
+    <button id="log-indir">CSV Indir</button>
+    <button id="log-sil">Temizle</button>
+  </div>
+  <div id="log-durum" class="olcum"></div>
+</section>
+
+<!-- -------------------------------------------------------------- ayarlar -->
+<section id="s-ayar" class="sekme">
+  <h2>Ayarlar</h2>
+  <div class="satir kucuk">
+    <label>Maks hiz (adim/s) <input data-param="maks_sps" type="number" step="10"></label>
+    <label>Ivme (adim/s2) <input data-param="ivme" type="number" step="50"></label>
+    <label>Kalkis hizi <input data-param="baslangic_sps" type="number" step="10"></label>
+    <label>Reduktor (az) <input data-param="reduktor_az" type="number" step="0.1"></label>
+    <label>Reduktor (el) <input data-param="reduktor_el" type="number" step="0.1"></label>
+    <label>Kuzey ofset <input data-param="kuzey_ofset" type="number" step="1"></label>
+    <label>AZ limit <input data-param="az_limit" type="number" step="10"></label>
+    <label>EL min <input data-param="el_min" type="number" step="1"></label>
+    <label>EL maks <input data-param="el_maks" type="number" step="1"></label>
+    <label>Limitler acik <input data-param="limit_aktif" type="checkbox"></label>
+    <label>Tutma torku <input data-param="tutma_torku" type="checkbox"></label>
+  </div>
+  <p class="ipucu">
+    Degisiklikler aninda uygulanir ve birkac saniye icinde karta kalici olarak
+    yazilir. 12 V'a gectiginizde yalnizca hiz ve ivme degerlerini guncellemeniz
+    yeterli.
+  </p>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

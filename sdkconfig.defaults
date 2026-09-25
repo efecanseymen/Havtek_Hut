@@ -1,0 +1,25 @@
+# HAVTEK v0.1 -- proje geneli varsayilanlar.
+#
+# FREERTOS_HZ=1000 SART: gercek zaman gorevi 1 ms izgarada kosuyor ve adim
+# zamanlamasi bu izgaraya oturuyor. 100 Hz tick'te her bekleme mesgul beklemeye
+# duser, idle task acliktan Task WDT'yi tetikler.
+CONFIG_FREERTOS_HZ=1000
+
+# Flash ve bolum tablosu: WiFi + httpd + cJSON ile uygulama 1 MB'i asiyor,
+# varsayilan "single factory app" bolum tablosu yetmez.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# WebSocket telemetrisi icin sart.
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Es zamanli acik soket: tarayici + log akisi + yedek istemci.
+CONFIG_LWIP_MAX_SOCKETS=10
+
+# Kontrol dongusu hiz istiyor.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Task WDT: gercek zaman gorevi kendini besliyor, 10 s comert bir tavan.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
