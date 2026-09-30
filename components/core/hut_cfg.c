@@ -17,7 +17,7 @@
 static const char *TAG = "cfg";
 
 #define CFG_SIHIR   0x48555431u    /* "HUT1" */
-#define CFG_SURUM   4   /* v3: olcum_ekseni eklendi */
+#define CFG_SURUM   5   /* v3: olcum_ekseni eklendi */
 #define NVS_ALAN    "havtek"
 #define NVS_ANAHTAR "cfg"
 
@@ -92,6 +92,7 @@ void hut_cfg_varsayilan(hut_cfg_t *c)
     /* Korumalar varsayilan olarak ACIK; ana anahtar kapali. Yani kutudan
        cikan davranis guvenli taraf. */
     c->guvenlik_kapali = false;
+    c->hata_kapali     = false;
     c->pencere_aktif   = true;
     c->sapma_aktif     = true;
     c->ters_yon_aktif  = true;
@@ -239,6 +240,11 @@ bool hut_cfg_param_ayarla(hut_cfg_t *c, const char *anahtar, float deger)
         hut_cfg_kirlet();
         return true;
     }
+    if (strcmp(anahtar, "hata_kapali") == 0) {
+        c->hata_kapali = (deger != 0.0f);
+        hut_cfg_kirlet();
+        return true;
+    }
     if (strcmp(anahtar, "guvenlik_kapali") == 0) {
         c->guvenlik_kapali = (deger != 0.0f);
         hut_cfg_kirlet();
@@ -289,7 +295,7 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         "\"q_aci\":%.4f,\"q_bias\":%.4f,\"r_olcum\":%.4f,"
         "\"az_limit\":%.1f,\"el_min\":%.1f,\"el_maks\":%.1f,\"limit_aktif\":%d,"
         "\"guvenlik_kapali\":%d,\"pencere_aktif\":%d,\"sapma_aktif\":%d,"
-        "\"ters_yon_aktif\":%d,"
+        "\"ters_yon_aktif\":%d,\"hata_kapali\":%d,"
         "\"reduktor_az\":%.3f,\"reduktor_el\":%.3f,\"tutma_torku\":%d,"
         "\"kuzey_ofset\":%.1f,\"gyro_kalibre\":%d,\"mag_kalibre\":%d,"
         "\"olcum_az\":%d,\"olcum_el\":%d}",
@@ -302,6 +308,7 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         c->az_limit, c->el_min, c->el_maks, c->limit_aktif ? 1 : 0,
         c->guvenlik_kapali ? 1 : 0, c->pencere_aktif ? 1 : 0,
         c->sapma_aktif ? 1 : 0, c->ters_yon_aktif ? 1 : 0,
+        c->hata_kapali ? 1 : 0,
         c->reduktor[ROL_AZ], c->reduktor[ROL_EL], c->tutma_torku ? 1 : 0,
         c->kuzey_ofset, c->gyro_kalibre ? 1 : 0, c->mag_kalibre ? 1 : 0,
         c->olcum_ekseni[ROL_AZ], c->olcum_ekseni[ROL_EL]);

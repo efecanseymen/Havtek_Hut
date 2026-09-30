@@ -123,6 +123,12 @@ static uint32_t s_log_satir;
 static uint32_t s_asim;
 static uint32_t s_dongu_us;   /* son yayindan beri en uzun dilim */
 
+/* Test modunda durdurulmadan gecilen olaylar. Olay yok sayilmiyor,
+   sadece sistemi kilitlemiyor; sonradan "ne oldu" diye bakilabilsin. */
+static uint32_t    s_bastirilan;
+static hata_kodu_t s_son_olay = HATA_YOK;
+static int64_t     s_bastirma_log_us;
+
 /* manyetometre kalibrasyonu */
 static bool  s_mag_kal;
 static float s_mag_min[3], s_mag_maks[3];
@@ -193,6 +199,26 @@ static void acil_durdur(void)
 
 static void hataya_dus(hata_kodu_t kod)
 {
+    /*
+     * TEST MODU: olayi say, gerekirse log'a bas, ama sistemi DURDURMA.
+     * Log hiz siniri var (2 saniyede bir): saniyede 100 kez tetiklenen bir
+     * olay seri portu bogar ve gercek mesajlari gorunmez yapar.
+     */
+    if (g_cfg.hata_kapali) {
+        int64_t simdi = esp_timer_get_time();
+
+        s_bastirilan++;
+        s_son_olay = kod;
+
+        if (simdi - s_bastirma_log_us > 2000000) {
+            s_bastirma_log_us = simdi;
+            ESP_LOGW(TAG, "[test modu] olay %d bastirildi (toplam %lu) -- "
+                     "sistem durdurulmadi", (int)kod,
+                     (unsigned long)s_bastirilan);
+        }
+        return;
+    }
+
     for (int i = 0; i < s_eksen_sayi; i++) {
         eksen_acil_dur(&s_eksen[i]);
     }
@@ -515,6 +541,12 @@ static const char *rol_adi(int rol)
 /* Sistemi durdurmayan sorun: operator gorsun ama is durmasin. */
 static void uyar(hata_kodu_t kod)
 {
+    /* Test modunda uyari da gosterilmiyor; yalnizca sayiliyor. */
+    if (g_cfg.hata_kapali) {
+        s_bastirilan++;
+        s_son_olay = kod;
+        return;
+    }
     s_uyari    = kod;
     s_uyari_us = esp_timer_get_time();
 }
@@ -1040,6 +1072,8 @@ static void komut_uygula(const komut_t *k)
     case KOMUT_HATA_SIL:
         s_hata  = HATA_YOK;
         s_uyari = HATA_YOK;
+        s_bastirilan = 0;
+        s_son_olay   = HATA_YOK;
         s_mod   = MOD_BOSTA;
         /*
          * Hatadan cikinca MANUEL'e dusuyoruz. Otomatik moda geri donmeyi
@@ -1318,6 +1352,9 @@ static void durum_yayinla(int64_t simdi, uint32_t dongu_us)
     d.asim      = s_asim;
     d.log_acik  = s_log_acik;
     d.log_satir = s_log_satir;
+    d.test_modu  = g_cfg.hata_kapali;
+    d.bastirilan = s_bastirilan;
+    d.son_olay   = s_son_olay;
 
     hut_durum_yaz(&d);
 }
@@ -1370,7 +1407,25 @@ static void kontrol_dilimi(int64_t simdi, float dt)
             }
         } else if (simdi - s_imu_son_us > IMU_ZAMAN_ASIMI_US) {
             s_imu.gecerli = false;
-            if (s_stab_acik) {
+
+            /*
+             * Test modunda kilitleme yok, ama gecersiz veriyle motor surmek
+             * de dogru degil: hizlari sifirlayip veri geri gelene kadar
+             * bekliyoruz. Veri donunce takip kendiliginden devam ediyor.
+             */
+            if (g_cfg.hata_kapali) {
+                if (s_stab_acik) {
+                    for (int r = 0; r < ROL_SAYISI; r++) {
+                        int idx = eksen_bul_rol(r);
+                        if (idx >= 0) {
+                            eksen_hiz(&s_eksen[idx], 0.0f);
+                        }
+                        s_stab[r].sps = 0.0f;
+                    }
+                    uyar(HATA_IMU_ZAMAN_ASIMI);
+                }
+                (void)i2c_hub_kurtar(0);
+            } else if (s_stab_acik) {
                 /* Stabilizasyon acikken korlesmek en tehlikeli durum. */
                 hataya_dus(HATA_IMU_ZAMAN_ASIMI);
                 (void)i2c_hub_kurtar(0);

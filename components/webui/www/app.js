@@ -183,7 +183,10 @@ function ciz(d) {
   const kismi = lim.pencere === 0 || lim.sapma === 0 || lim.ters === 0;
   const rozet = $('#guv-rozet');
 
-  if (lim.guv_kapali) {
+  if (d.sis && d.sis.test) {
+    rozet.textContent = 'TEST MODU';
+    rozet.style.display = '';
+  } else if (lim.guv_kapali) {
     rozet.textContent = 'GUVENLIK KAPALI';
     rozet.style.display = '';
   } else if (kismi) {
@@ -209,7 +212,10 @@ function ciz(d) {
     'tarayici  ' + logSatirlar.length + ' satir\n' +
     'kart      ' + y.satir + ' orneklem, dusen ' + y.dusen + '\n' +
     'dongu     ' + y.dongu + ' us   dilim asimi ' + y.asim + '\n' +
-    'istemci   ' + y.istemci;
+    'istemci   ' + y.istemci +
+    (y.test ? '\n\nTEST MODU ACIK -- hicbir hata sistemi durdurmuyor.\n' +
+      'bastirilan olay: ' + y.bastirilan +
+      (y.bastirilan ? '   (son: ' + y.son_olay + ')' : '') : '');
 }
 
 function f(v) {

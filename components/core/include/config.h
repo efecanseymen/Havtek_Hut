@@ -103,6 +103,14 @@ typedef struct {
      * yagmasi operatoru sadece korlestirir.
      */
     bool     guvenlik_kapali;    /* ANA ANAHTAR: tum limitleri bypass et     */
+
+    /*
+     * TEST MODU: hicbir hata sistemi durdurmaz, hicbir uyari gosterilmez.
+     * guvenlik_kapali limit TURUNDEN korumalari kapatir; bu ise hata
+     * mekanizmasinin KENDISINI kapatir (IMU zaman asimi, surucu kopmasi
+     * dahil). Olaylar sayiliyor ama kilitleme yapilmiyor.
+     */
+    bool     hata_kapali;
     bool     pencere_aktif;      /* otomatik modda kilit noktasi penceresi   */
     bool     sapma_aktif;        /* olculen hata siniri                      */
     bool     ters_yon_aktif;     /* ters polarite tespiti                    */

@@ -219,6 +219,11 @@ typedef struct {
     uint32_t asim;          /* 1 ms dilimini kacirma sayaci                */
     uint32_t log_satir;
     bool     log_acik;
+
+    /* Test modu: durdurulmayan olaylarin kaydi. */
+    bool        test_modu;
+    uint32_t    bastirilan;    /* kac olay durdurmadan gecildi             */
+    hata_kodu_t son_olay;      /* en son hangi olay bastirildi              */
 } sistem_durum_t;
 
 /* ------------------------------------------------------------------ log */

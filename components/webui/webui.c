@@ -532,10 +532,13 @@ static void telemetri_gonder(void)
 
     n += snprintf(tampon + n, sizeof(tampon) - n,
         "\"sis\":{\"dongu\":%lu,\"asim\":%lu,\"log\":%d,\"satir\":%lu,"
-        "\"dusen\":%lu,\"istemci\":%d,\"uyari\":\"%s\"}}",
+        "\"dusen\":%lu,\"istemci\":%d,\"uyari\":\"%s\","
+        "\"test\":%d,\"bastirilan\":%lu,\"son_olay\":\"%s\"}}",
         (unsigned long)d.dongu_us, (unsigned long)d.asim,
         d.log_acik ? 1 : 0, (unsigned long)d.log_satir,
-        (unsigned long)hut_log_dusen(), s_istemci_sayi, hata_adi(d.uyari));
+        (unsigned long)hut_log_dusen(), s_istemci_sayi, hata_adi(d.uyari),
+        d.test_modu ? 1 : 0, (unsigned long)d.bastirilan,
+        hata_adi(d.son_olay));
 
     yayinla(tampon, (size_t)n);
 }
