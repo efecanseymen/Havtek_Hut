@@ -592,7 +592,8 @@ static bool stab_eksen_calistir(int rol, float dt, int64_t simdi_us)
     }
 
     /* --- Guvenlik 1: sapma siniri --- */
-    if (mutlak > g_cfg.stab_hata_sinir) {
+    if (g_cfg.sapma_aktif && !g_cfg.guvenlik_kapali &&
+        mutlak > g_cfg.stab_hata_sinir) {
         ESP_LOGE(TAG, "%s: sapma siniri asildi (%.1f derece)", rol_adi(rol),
                  st->hata);
         hataya_dus(HATA_SAPMA);
@@ -612,7 +613,8 @@ static bool stab_eksen_calistir(int rol, float dt, int64_t simdi_us)
      * 200 ms araliklarla ve ust uste 3 kez istiyoruz -- elle egmek de hatayi
      * buyutur ama eksen hareketiyle tutarli bir iliski uretmez.
      */
-    if (simdi_us - st->ters_us >= 200000) {
+    if (g_cfg.ters_yon_aktif && !g_cfg.guvenlik_kapali &&
+        simdi_us - st->ters_us >= 200000) {
         float d_sapma = sapma - st->ters_sapma;
         float d_hata  = mutlak - fabsf(st->ters_hata);
 
@@ -638,7 +640,8 @@ static bool stab_eksen_calistir(int rol, float dt, int64_t simdi_us)
     }
 
     /* --- Guvenlik 3: calisma penceresi --- */
-    if (fabsf(sapma) > g_cfg.stab_pencere) {
+    if (g_cfg.pencere_aktif && !g_cfg.guvenlik_kapali &&
+        fabsf(sapma) > g_cfg.stab_pencere) {
         ESP_LOGE(TAG, "%s: calisma penceresi disina cikildi (%.1f derece, "
                  "sinir %.0f)", rol_adi(rol), sapma, g_cfg.stab_pencere);
         hataya_dus(HATA_LIMIT);
@@ -711,6 +714,18 @@ static void otomatik_ac(bool ac)
     ESP_LOGI(TAG, "  pencere=%.0f  sapma siniri=%.0f  maks hiz=%.0f adim/s  "
              "kilit siniri=%lu ms", g_cfg.stab_pencere, g_cfg.stab_hata_sinir,
              g_cfg.maks_sps, (unsigned long)g_cfg.kilit_sinir_ms);
+
+    if (g_cfg.guvenlik_kapali) {
+        ESP_LOGW(TAG, "  DIKKAT: GUVENLIK LIMITLERI TAMAMEN KAPALI.");
+        ESP_LOGW(TAG, "  Yon ters ise eksen durmadan kacar; kablo/mekanik");
+        ESP_LOGW(TAG, "  hasari riski var. Gercek antenle acmayin.");
+    } else {
+        ESP_LOGI(TAG, "  korumalar: pencere=%s sapma=%s ters_yon=%s eksen_limit=%s",
+                 g_cfg.pencere_aktif  ? "acik" : "KAPALI",
+                 g_cfg.sapma_aktif    ? "acik" : "KAPALI",
+                 g_cfg.ters_yon_aktif ? "acik" : "KAPALI",
+                 g_cfg.limit_aktif    ? "acik" : "KAPALI");
+    }
 }
 
 /*
@@ -1391,7 +1406,10 @@ static void kontrol_dilimi(int64_t simdi, float dt)
 
     /* --- eksen limitine dayanma: hata degil UYARI --- */
     for (int r = 0; r < s_eksen_sayi; r++) {
-        if (s_eksen[r].limit_vurdu) {
+        /* Limit kapatildiysa uyarisi da uretilmez: kapatilan korumadan
+           uyari yagmasi operatoru gercek sorunlara karsi korlestirir. */
+        if (s_eksen[r].limit_vurdu && g_cfg.limit_aktif &&
+            !g_cfg.guvenlik_kapali) {
             uyar(HATA_LIMIT);
         }
         if (s_eksen[r].i2c_hata > 0 && s_eksen[r].i2c_hata < 20) {

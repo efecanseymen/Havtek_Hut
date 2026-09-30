@@ -176,6 +176,23 @@ function ciz(d) {
   }
   $('#mt-durum').textContent = mt;
 
+  /* --- guvenlik korumalari kapaliysa kalici gosterge ---
+     Uyari seridi 5 saniyede kayboluyor; bu ise KAPALI kaldigi surece
+     gorunmeli, yoksa acik sanip gercek antenle calisilir. */
+  const lim = d.lim || {};
+  const kismi = lim.pencere === 0 || lim.sapma === 0 || lim.ters === 0;
+  const rozet = $('#guv-rozet');
+
+  if (lim.guv_kapali) {
+    rozet.textContent = 'GUVENLIK KAPALI';
+    rozet.style.display = '';
+  } else if (kismi) {
+    rozet.textContent = 'koruma eksik';
+    rozet.style.display = '';
+  } else {
+    rozet.style.display = 'none';
+  }
+
   /* --- uyari: sistemi durdurmayan sorun --- */
   const uy = $('#uyari');
   if (d.sis && d.sis.uyari && d.sis.uyari !== 'yok') {

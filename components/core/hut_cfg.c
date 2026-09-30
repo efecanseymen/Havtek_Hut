@@ -17,7 +17,7 @@
 static const char *TAG = "cfg";
 
 #define CFG_SIHIR   0x48555431u    /* "HUT1" */
-#define CFG_SURUM   3   /* v3: olcum_ekseni eklendi */
+#define CFG_SURUM   4   /* v3: olcum_ekseni eklendi */
 #define NVS_ALAN    "havtek"
 #define NVS_ANAHTAR "cfg"
 
@@ -88,6 +88,13 @@ void hut_cfg_varsayilan(hut_cfg_t *c)
     /* v0.1'de limitler KAPALI: tezgahta tek motorla deneme yapilacak ve
        referans noktasi henuz anlamli degil. Arayuzden acilabilir. */
     c->limit_aktif = false;
+
+    /* Korumalar varsayilan olarak ACIK; ana anahtar kapali. Yani kutudan
+       cikan davranis guvenli taraf. */
+    c->guvenlik_kapali = false;
+    c->pencere_aktif   = true;
+    c->sapma_aktif     = true;
+    c->ters_yon_aktif  = true;
 
     for (int i = 0; i < 3; i++) {
         c->mag_olcek[i] = 1.0f;
@@ -232,6 +239,26 @@ bool hut_cfg_param_ayarla(hut_cfg_t *c, const char *anahtar, float deger)
         hut_cfg_kirlet();
         return true;
     }
+    if (strcmp(anahtar, "guvenlik_kapali") == 0) {
+        c->guvenlik_kapali = (deger != 0.0f);
+        hut_cfg_kirlet();
+        return true;
+    }
+    if (strcmp(anahtar, "pencere_aktif") == 0) {
+        c->pencere_aktif = (deger != 0.0f);
+        hut_cfg_kirlet();
+        return true;
+    }
+    if (strcmp(anahtar, "sapma_aktif") == 0) {
+        c->sapma_aktif = (deger != 0.0f);
+        hut_cfg_kirlet();
+        return true;
+    }
+    if (strcmp(anahtar, "ters_yon_aktif") == 0) {
+        c->ters_yon_aktif = (deger != 0.0f);
+        hut_cfg_kirlet();
+        return true;
+    }
     if (strcmp(anahtar, "olcum_az") == 0) {
         c->olcum_ekseni[ROL_AZ] = (uint8_t)deger;
         hut_cfg_kirlet();
@@ -261,6 +288,8 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         "\"kilit_sinir_ms\":%lu,\"mudahale_test\":%.1f,"
         "\"q_aci\":%.4f,\"q_bias\":%.4f,\"r_olcum\":%.4f,"
         "\"az_limit\":%.1f,\"el_min\":%.1f,\"el_maks\":%.1f,\"limit_aktif\":%d,"
+        "\"guvenlik_kapali\":%d,\"pencere_aktif\":%d,\"sapma_aktif\":%d,"
+        "\"ters_yon_aktif\":%d,"
         "\"reduktor_az\":%.3f,\"reduktor_el\":%.3f,\"tutma_torku\":%d,"
         "\"kuzey_ofset\":%.1f,\"gyro_kalibre\":%d,\"mag_kalibre\":%d,"
         "\"olcum_az\":%d,\"olcum_el\":%d}",
@@ -271,6 +300,8 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         (unsigned long)c->kilit_sinir_ms, c->mudahale_test,
         c->q_aci, c->q_bias, c->r_olcum,
         c->az_limit, c->el_min, c->el_maks, c->limit_aktif ? 1 : 0,
+        c->guvenlik_kapali ? 1 : 0, c->pencere_aktif ? 1 : 0,
+        c->sapma_aktif ? 1 : 0, c->ters_yon_aktif ? 1 : 0,
         c->reduktor[ROL_AZ], c->reduktor[ROL_EL], c->tutma_torku ? 1 : 0,
         c->kuzey_ofset, c->gyro_kalibre ? 1 : 0, c->mag_kalibre ? 1 : 0,
         c->olcum_ekseni[ROL_AZ], c->olcum_ekseni[ROL_EL]);

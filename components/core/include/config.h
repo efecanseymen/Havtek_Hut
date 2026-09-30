@@ -91,7 +91,21 @@ typedef struct {
 
     /* limitler (derece) */
     float    az_limit, el_min, el_maks;
-    bool     limit_aktif;
+    bool     limit_aktif;        /* eksen yazilim limitleri                  */
+
+    /*
+     * Korumalar ayri ayri kapatilabiliyor. Tezgahta mekanik henuz
+     * bilinmezken bu korumalar isi kolaylastirmak yerine durduruyor; ama
+     * gercek antenle calisirken acik olmalari sart.
+     *
+     * guvenlik_kapali: hepsini birden bypass eder (TEST anahtari). Acikken
+     * ilgili uyari ve hatalar da URETILMEZ -- kapatilan korumadan uyari
+     * yagmasi operatoru sadece korlestirir.
+     */
+    bool     guvenlik_kapali;    /* ANA ANAHTAR: tum limitleri bypass et     */
+    bool     pencere_aktif;      /* otomatik modda kilit noktasi penceresi   */
+    bool     sapma_aktif;        /* olculen hata siniri                      */
+    bool     ters_yon_aktif;     /* ters polarite tespiti                    */
 
     /* kalibrasyon */
     float    gyro_bias[3];

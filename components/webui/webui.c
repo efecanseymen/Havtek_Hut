@@ -505,13 +505,16 @@ static void telemetri_gonder(void)
         "\"kilit_ms\":%lu,\"kilit_ok\":%d,\"kilit_olcum\":%d,"
         "\"rms\":%.3f,\"maks\":%.2f,\"sure\":%lu},"
         "\"lim\":{\"aktif\":%d,\"az\":%.2f,\"el_min\":%.2f,\"el_maks\":%.2f,"
-        "\"olcum_az\":%d,\"olcum_el\":%d},",
+        "\"olcum_az\":%d,\"olcum_el\":%d,\"guv_kapali\":%d,"
+        "\"pencere\":%d,\"sapma\":%d,\"ters\":%d},",
         d.stab_acik ? 1 : 0, (int)d.kmod, d.kilitli ? 1 : 0,
         d.mudahale ? 1 : 0, (unsigned long)d.kilitlenme_ms,
         d.kilitlenme_ok ? 1 : 0, d.kilitlenme_olculuyor ? 1 : 0,
         d.perf_rms, d.perf_maks, (unsigned long)d.perf_sure_s,
         g_cfg.limit_aktif ? 1 : 0, g_cfg.az_limit, g_cfg.el_min, g_cfg.el_maks,
-        g_cfg.olcum_ekseni[ROL_AZ], g_cfg.olcum_ekseni[ROL_EL]);
+        g_cfg.olcum_ekseni[ROL_AZ], g_cfg.olcum_ekseni[ROL_EL],
+        g_cfg.guvenlik_kapali ? 1 : 0, g_cfg.pencere_aktif ? 1 : 0,
+        g_cfg.sapma_aktif ? 1 : 0, g_cfg.ters_yon_aktif ? 1 : 0);
 
     /* Eksen basina stabilizasyon durumu: iki eksen ayni anda calisiyor. */
     n += snprintf(tampon + n, sizeof(tampon) - n, "\"stab\":[");

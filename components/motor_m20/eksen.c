@@ -132,7 +132,8 @@ int32_t eksen_derece_adim(float derece, float reduktor)
 /* Yazilim limiti: bu yonde bir adim daha atilabilir mi? */
 static bool limit_izin_verir(const eksen_t *e, int8_t yon_isaret)
 {
-    if (!g_cfg.limit_aktif) {
+    /* Ana anahtar kapatildiysa hicbir eksen limiti uygulanmaz. */
+    if (!g_cfg.limit_aktif || g_cfg.guvenlik_kapali) {
         return true;
     }
     float reduktor = g_cfg.reduktor[e->rol < ROL_SAYISI ? e->rol : 0];
