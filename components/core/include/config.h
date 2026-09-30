@@ -28,6 +28,7 @@
 #define VARS_MAKS_SPS       300.0f   /* I2C tavani 500; 300 guvenli baslangic*/
 #define VARS_IVME           600.0f   /* adim/s^2                             */
 #define VARS_JOG_SPS        150.0f
+#define VARS_JOG_DPS        10.0f    /* jog hizi DERECE/S (antende)  */
 #define VARS_BASLANGIC_SPS  60.0f    /* duran motorun kalkis (cekme) hizi    */
 
 #define VARS_KP_MIN         2.0f     /* kucuk hatada yumusak                 */
@@ -36,6 +37,10 @@
 #define VARS_HATA_OLCEK     5.0f     /* Kp'nin doyuma gittigi hata (derece)  */
 #define VARS_OLU_BANT       0.25f    /* bir adim: icinde hareket yok         */
 #define VARS_ENTEGRAL_SINIR 50.0f
+
+/* Sartname: manuel mudahaleden sonra hedefe yeniden yonelim suresi 8 sn. */
+#define VARS_KILIT_SINIR_MS 8000
+#define VARS_MUDAHALE_TEST  15.0f    /* testin kaydiracagi aci (derece)      */
 
 #define VARS_STAB_PENCERE   20.0f    /* referanstan +-20 derece calisma alani*/
 #define VARS_STAB_HATA_SINIR 30.0f   /* asilirsa dur + hata                  */
@@ -62,6 +67,7 @@ typedef struct {
     float    maks_sps;
     float    ivme;
     float    jog_sps;
+    float    jog_dps;           /* jog hizi derece/s -- arayuz bunu kullanir */
     float    baslangic_sps;     /* rampanin basladigi hiz                   */
     bool     tutma_torku;       /* hareket bitince bobinler enerjili kalsin? */
 
@@ -70,6 +76,10 @@ typedef struct {
     float    kp_min, kp_maks, ki, hata_olcek;
     float    olu_bant, entegral_sinir;
     float    stab_pencere, stab_hata_sinir;
+
+    /* otomatik mod */
+    uint32_t kilit_sinir_ms;    /* sartname siniri: 8000                    */
+    float    mudahale_test;     /* mudahale testinin kaydirdigi aci         */
 
     /* filtre */
     float    q_aci, q_bias, r_olcum;

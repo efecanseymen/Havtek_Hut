@@ -13,7 +13,9 @@ let logSatirlar = [];
 const LOG_BASLIK = [
   't_us', 'gx', 'gy', 'gz', 'ax', 'ay', 'az',
   'roll', 'pitch', 'yaw', 'adim_az', 'adim_el',
-  'sps_az', 'sps_el', 'hedef', 'hata', 'kp'
+  'sps_az', 'sps_el',
+  'hedef_az', 'hedef_el', 'hata_az', 'hata_el',
+  'kp_az', 'kp_el', 'kmod', 'mudahale'
 ];
 
 /* ----------------------------------------------------------- baglanti */
@@ -101,14 +103,57 @@ function ciz(d) {
     'pusula ' + (i.pusula >= 0 ? f(i.pusula) : 'yok') +
     '   gyro kalibrasyonu: ' + (i.kalibre ? 'yapildi' : 'YAPILMADI');
 
-  /* stabilizasyon */
-  const s = d.stab || {};
-  $('#st-durum').textContent =
-    'durum   ' + (s.on ? 'ACIK' : 'kapali') + '   eksen: ' + (s.rol === 0 ? 'yatay' : 'dikey') + '\n' +
-    'hedef   ' + f(s.hedef) + '\n' +
-    'olculen ' + f(s.olculen) + '\n' +
-    'hata    ' + f(s.e) + '\n' +
-    'Kp      ' + f(s.kp) + '   komut ' + f(s.sps) + ' adim/s';
+  /* --- otomatik mod ozeti --- */
+  const o = d.oto || {};
+  const kmodAd = o.kmod ? 'OTOMATIK' : 'MANUEL';
+
+  $('#oto-durum').textContent =
+    'kullanici modu   ' + kmodAd +
+      (o.mudahale ? '   [MUDAHALE -- takip askida]' : '') + '\n' +
+    'takip            ' + (o.on ? 'CALISIYOR' : 'kapali') +
+      '   hedef kilidi: ' + (o.kilitli ? 'var' : 'YOK') + '\n' +
+    'performans       hata RMS ' + f(o.rms) + ' derece' +
+      '   en buyuk ' + f(o.maks) + ' derece   sure ' + (o.sure || 0) + ' s';
+
+  /* Mod dugmelerini aktif duruma gore isaretle. */
+  $('#km-oto').classList.toggle('aktif-mod', !!o.kmod);
+  $('#km-manuel').classList.toggle('aktif-mod', !o.kmod);
+
+  /* --- eksen basina stabilizasyon --- */
+  const satirlar = (d.stab || []).map((st) => {
+    const ad = st.rol === 0 ? 'yatay' : 'dikey';
+    if (!st.var) return ad.padEnd(6) + '  surucu yok';
+    return ad.padEnd(6) +
+      '  ' + (st.aktif ? 'takip' : 'bekle ') +
+      '  hedef ' + f(st.hedef) +
+      '  olculen ' + f(st.olculen) +
+      '  hata ' + f(st.e) +
+      '  Kp ' + f(st.kp) +
+      '  komut ' + f(st.sps) + ' adim/s' +
+      '  sapma ' + f(st.sapma);
+  });
+  $('#st-durum').textContent = satirlar.join('\n') || 'eksen yok';
+
+  /* --- 8 saniye testi --- */
+  let mt;
+  if (o.kilit_olcum) {
+    mt = 'olculuyor... (hedefe geri donuyor)';
+  } else if (o.kilit_ms) {
+    mt = 'son yeniden kilitlenme: ' + (o.kilit_ms / 1000).toFixed(2) + ' s  ->  ' +
+         (o.kilit_ok ? 'GECTI' : 'SINIR ASILDI');
+  } else {
+    mt = 'henuz olcum yok';
+  }
+  $('#mt-durum').textContent = mt;
+
+  /* --- uyari: sistemi durdurmayan sorun --- */
+  const uy = $('#uyari');
+  if (d.sis && d.sis.uyari && d.sis.uyari !== 'yok') {
+    uy.textContent = 'uyari: ' + d.sis.uyari;
+    uy.style.display = '';
+  } else {
+    uy.style.display = 'none';
+  }
 
   /* sistem */
   const y = d.sis || {};
@@ -155,6 +200,8 @@ async function ayarlariYukle() {
     });
     $('#surum').textContent = 'v' + c.surum;
     $('#st-fuzzy').value = c.fuzzy ? '1' : '0';
+    if (c.jog_dps !== undefined) $('#m-sps').value = c.jog_dps;
+    if (c.mudahale_test !== undefined) $('#mt-derece').value = c.mudahale_test;
   } catch (e) { /* sunucu henuz hazir degil */ }
 }
 
@@ -172,12 +219,21 @@ document.querySelectorAll('#sekmeler button').forEach((b) => {
 $('#estop').onclick    = () => gonder({ c: 'estop' });
 $('#hata-sil').onclick = () => gonder({ c: 'hata_sil' });
 
+/* --- manuel / otomatik --- */
+$('#km-manuel').onclick = () => gonder({ c: 'kmod', v: 0 });
+$('#km-oto').onclick    = () => gonder({ c: 'kmod', v: 1 });
+$('#st-dusur').onclick  = () => gonder({ c: 'takipten_dus' });
+$('#perf-sifirla').onclick = () => gonder({ c: 'perf_sifirla' });
+
+/* --- sartname 8 saniye testi --- */
+$('#mt-bas').onclick = () => gonder({
+  c: 'mtest', rol: +$('#mt-rol').value, derece: +$('#mt-derece').value
+});
+$('#hata-sil').onclick = () => gonder({ c: 'hata_sil' });
+
 $('#lim-alt').onclick = () => gonder({ c: 'limit_ogret', rol: +$('#m-rol').value, ust: 0 });
 $('#lim-ust').onclick = () => gonder({ c: 'limit_ogret', rol: +$('#m-rol').value, ust: 1 });
 
-/* Olcum acisi: hangi eksen icin degistirildigini stab panelindeki rol belirler. */
-$('#st-olcum').onchange = (e) =>
-  gonder({ c: 'olcum', rol: +$('#st-rol').value, eksen: +e.target.value });
 $('#tara').onclick  = () => gonder({ c: 'tara' });
 
 /* jog: basili tutuldugu surece doner. Fare/parmak kalkinca durur -- bu
@@ -207,8 +263,11 @@ $('#mag-kal-bas').onclick = () => gonder({ c: 'mag_kalibre', on: 1 });
 $('#mag-kal-bit').onclick = () => gonder({ c: 'mag_kalibre', on: 0 });
 
 $('#st-kilit').onclick = () => gonder({ c: 'kilit' });
-$('#st-ac').onclick    = () => gonder({ c: 'stab', on: 1, rol: +$('#st-rol').value });
-$('#st-kapat').onclick = () => gonder({ c: 'stab', on: 0 });
+$('#st-olcum-az').onchange = (e) =>
+  gonder({ c: 'olcum', rol: 0, eksen: +e.target.value });
+$('#st-olcum-el').onchange = (e) =>
+  gonder({ c: 'olcum', rol: 1, eksen: +e.target.value });
+
 $('#st-fuzzy').onchange = (e) => gonder({ c: 'param', k: 'fuzzy', v: +e.target.value });
 
 $('#log-bas').onclick   = () => gonder({ c: 'log', on: 1 });

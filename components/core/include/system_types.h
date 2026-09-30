@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define HUT_SURUM  "0.1.0"
+#define HUT_SURUM  "0.2.0"
 
 /* Ayni anda izlenen en fazla eksen sayisi. */
 #define HUT_MAKS_SURUCU  4
@@ -28,6 +28,20 @@ typedef enum {
 } eksen_rol_t;
 
 /* ------------------------------------------------------------------ modlar */
+
+/*
+ * KULLANICI MODU -- sartnamenin istedigi iki mod. Operatorun sectigi sey bu.
+ *   MANUEL   : arayuzden girilen aci/jog komutlari uygulanir, stabilizasyon yok
+ *   OTOMATIK : hedef kilitli, sensorle surekli duzeltme yapilir
+ *
+ * Asagidaki sistem_modu_t ise sistemin O AN ne yaptigini soyleyen ic durum
+ * (jog mu ediyor, aciya mi gidiyor, hata mi var). Ikisi ayri kavram: operator
+ * OTOMATIK'te iken bile sistem gecici olarak "mudahale" durumunda olabilir.
+ */
+typedef enum {
+    KMOD_MANUEL = 0,
+    KMOD_OTOMATIK = 1
+} kullanici_modu_t;
 
 typedef enum {
     MOD_BOSTA = 0,     /* motor duruyor, bobinler enerjili                 */
@@ -89,7 +103,11 @@ typedef enum {
     KOMUT_LOG,            /* a = 1 ac / 0 kapat                            */
     KOMUT_YON_TERS,       /* a = rol : yonu ters cevir                     */
     KOMUT_LIMIT_OGRET,    /* a = rol, b = 0 alt / 1 ust : burasi limit     */
-    KOMUT_OLCUM_EKSENI    /* a = rol, b = 0 roll / 1 pitch / 2 yaw         */
+    KOMUT_OLCUM_EKSENI,   /* a = rol, b = 0 roll / 1 pitch / 2 yaw         */
+    KOMUT_KULLANICI_MODU, /* a = 0 manuel / 1 otomatik                     */
+    KOMUT_TAKIPTEN_DUS,   /* sartname: takipten dusurme                    */
+    KOMUT_MUDAHALE_TEST,  /* a = rol, c = derece : 8 sn testini calistir   */
+    KOMUT_PERF_SIFIRLA    /* stabilizasyon performans sayaclarini sifirla   */
 } komut_tipi_t;
 
 /* Stabilizasyonun hangi IMU acisini takip ettigi. Mekanik montaj IMU'yu nasil
@@ -123,10 +141,25 @@ typedef struct {
     uint32_t i2c_hata;
 } eksen_durum_t;
 
+/* Bir eksenin stabilizasyon durumu. Iki eksen ayni anda calisabiliyor. */
+typedef struct {
+    bool     aktif;        /* bu eksen stabilize ediliyor mu                */
+    bool     surucu_var;
+    float    hedef;        /* kilitlenen aci (derece)                       */
+    float    olculen;      /* IMU'nun o an okudugu aci                      */
+    float    hata;         /* hedef - olculen                               */
+    float    kp;           /* kontrolcunun o anki kazanci                   */
+    float    sps;          /* motora verilen hiz komutu                     */
+    float    sapma;        /* eksenin kilit noktasindan uzakligi            */
+    uint8_t  olcum;        /* hangi IMU acisi (OLCUM_*)                     */
+} stab_durum_t;
+
 typedef struct {
     int64_t        t_us;
     sistem_modu_t  mod;
     hata_kodu_t    hata;
+    hata_kodu_t    uyari;      /* sistemi durdurmayan sorun                */
+    kullanici_modu_t kmod;
 
     imu_orneklem_t imu;
     durus_t        durus;
@@ -139,14 +172,21 @@ typedef struct {
     uint8_t        mag_adres;
     char           mag_tip[12];
 
-    /* stabilizasyon paneli */
-    bool     stab_acik;
-    uint8_t  stab_rol;
-    float    stab_hedef;
-    float    stab_olculen;
-    float    stab_hata;
-    float    stab_kp;
-    float    stab_sps;
+    /* stabilizasyon */
+    bool     stab_acik;        /* otomatik takip calisiyor mu              */
+    bool     kilitli;          /* hedef kilitlendi mi                      */
+    bool     mudahale;         /* operator gecici olarak elle yonlendiriyor */
+    stab_durum_t stab[ROL_SAYISI];
+
+    /* sartname: mudahale sonrasi yeniden yonelim suresi (sinir 8 sn) */
+    uint32_t kilitlenme_ms;
+    bool     kilitlenme_ok;
+    bool     kilitlenme_olculuyor;
+
+    /* stabilizasyon performansi (hedefe ne kadar iyi tutunuyor) */
+    float    perf_rms;         /* hata RMS, derece                         */
+    float    perf_maks;        /* en buyuk mutlak hata, derece             */
+    uint32_t perf_sure_s;      /* kac saniyedir olculuyor                  */
 
     /* kalibrasyon */
     bool     mag_kalibre_suruyor;
@@ -169,7 +209,9 @@ typedef struct {
     float   roll, pitch, yaw;
     int32_t adim[2];
     float   sps[2];
-    float   hedef;
-    float   hata;
-    float   kp;
+    float   hedef[2];      /* eksen basina kilitlenen aci                  */
+    float   hata[2];       /* eksen basina hata                            */
+    float   kp[2];
+    uint8_t kmod;          /* 0 manuel / 1 otomatik                        */
+    uint8_t mudahale;
 } log_orneklem_t;

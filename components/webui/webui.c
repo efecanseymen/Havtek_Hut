@@ -280,6 +280,18 @@ static bool komut_ayristir(const char *j, komut_t *k)
         k->tip = KOMUT_STAB;
         k->a   = (int32_t)sayi(j, "on", 0);
         k->b   = rol_coz(j, "rol");
+    } else if (strcmp(komut, "kmod") == 0) {
+        /* Sartnamenin iki modu: 0 = manuel, 1 = otomatik. */
+        k->tip = KOMUT_KULLANICI_MODU;
+        k->a   = (int32_t)sayi(j, "v", 0);
+    } else if (strcmp(komut, "takipten_dus") == 0) {
+        k->tip = KOMUT_TAKIPTEN_DUS;
+    } else if (strcmp(komut, "mtest") == 0) {
+        k->tip = KOMUT_MUDAHALE_TEST;
+        k->a   = rol_coz(j, "rol");
+        k->c   = sayi(j, "derece", 0);
+    } else if (strcmp(komut, "perf_sifirla") == 0) {
+        k->tip = KOMUT_PERF_SIFIRLA;
     } else if (strcmp(komut, "kilit") == 0) {
         k->tip = KOMUT_STAB_KILIT;
     } else if (strcmp(komut, "limit_ogret") == 0) {
@@ -441,7 +453,7 @@ static const char *hata_adi(hata_kodu_t h)
 
 static void telemetri_gonder(void)
 {
-    static char tampon[1600];
+    static char tampon[2400];
     sistem_durum_t d;
     int n = 0;
 
@@ -474,19 +486,38 @@ static void telemetri_gonder(void)
     n += snprintf(tampon + n, sizeof(tampon) - n, "],");
 
     n += snprintf(tampon + n, sizeof(tampon) - n,
-        "\"stab\":{\"on\":%d,\"rol\":%d,\"hedef\":%.2f,\"olculen\":%.2f,"
-        "\"e\":%.2f,\"kp\":%.2f,\"sps\":%.1f},"
+        "\"oto\":{\"on\":%d,\"kmod\":%d,\"kilitli\":%d,\"mudahale\":%d,"
+        "\"kilit_ms\":%lu,\"kilit_ok\":%d,\"kilit_olcum\":%d,"
+        "\"rms\":%.3f,\"maks\":%.2f,\"sure\":%lu},"
         "\"lim\":{\"aktif\":%d,\"az\":%.2f,\"el_min\":%.2f,\"el_maks\":%.2f,"
-        "\"olcum_az\":%d,\"olcum_el\":%d},"
-        "\"sis\":{\"dongu\":%lu,\"asim\":%lu,\"log\":%d,\"satir\":%lu,"
-        "\"dusen\":%lu,\"istemci\":%d}}",
-        d.stab_acik ? 1 : 0, d.stab_rol, d.stab_hedef, d.stab_olculen,
-        d.stab_hata, d.stab_kp, d.stab_sps,
+        "\"olcum_az\":%d,\"olcum_el\":%d},",
+        d.stab_acik ? 1 : 0, (int)d.kmod, d.kilitli ? 1 : 0,
+        d.mudahale ? 1 : 0, (unsigned long)d.kilitlenme_ms,
+        d.kilitlenme_ok ? 1 : 0, d.kilitlenme_olculuyor ? 1 : 0,
+        d.perf_rms, d.perf_maks, (unsigned long)d.perf_sure_s,
         g_cfg.limit_aktif ? 1 : 0, g_cfg.az_limit, g_cfg.el_min, g_cfg.el_maks,
-        g_cfg.olcum_ekseni[ROL_AZ], g_cfg.olcum_ekseni[ROL_EL],
+        g_cfg.olcum_ekseni[ROL_AZ], g_cfg.olcum_ekseni[ROL_EL]);
+
+    /* Eksen basina stabilizasyon durumu: iki eksen ayni anda calisiyor. */
+    n += snprintf(tampon + n, sizeof(tampon) - n, "\"stab\":[");
+    for (int r = 0; r < ROL_SAYISI && n < (int)sizeof(tampon) - 250; r++) {
+        n += snprintf(tampon + n, sizeof(tampon) - n,
+            "%s{\"rol\":%d,\"var\":%d,\"aktif\":%d,\"hedef\":%.2f,"
+            "\"olculen\":%.2f,\"e\":%.2f,\"kp\":%.2f,\"sps\":%.1f,"
+            "\"sapma\":%.2f,\"olcum\":%d}",
+            r ? "," : "", r, d.stab[r].surucu_var ? 1 : 0,
+            d.stab[r].aktif ? 1 : 0, d.stab[r].hedef, d.stab[r].olculen,
+            d.stab[r].hata, d.stab[r].kp, d.stab[r].sps, d.stab[r].sapma,
+            d.stab[r].olcum);
+    }
+    n += snprintf(tampon + n, sizeof(tampon) - n, "],");
+
+    n += snprintf(tampon + n, sizeof(tampon) - n,
+        "\"sis\":{\"dongu\":%lu,\"asim\":%lu,\"log\":%d,\"satir\":%lu,"
+        "\"dusen\":%lu,\"istemci\":%d,\"uyari\":\"%s\"}}",
         (unsigned long)d.dongu_us, (unsigned long)d.asim,
         d.log_acik ? 1 : 0, (unsigned long)d.log_satir,
-        (unsigned long)hut_log_dusen(), s_istemci_sayi);
+        (unsigned long)hut_log_dusen(), s_istemci_sayi, hata_adi(d.uyari));
 
     yayinla(tampon, (size_t)n);
 }
@@ -506,13 +537,15 @@ static void log_gonder(void)
         const log_orneklem_t *o = &ornekler[i];
         n += snprintf(tampon + n, sizeof(tampon) - n,
             "%s[%lld,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f,"
-            "%ld,%ld,%.1f,%.1f,%.3f,%.3f,%.2f]",
+            "%ld,%ld,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%d,%d]",
             i ? "," : "", (long long)o->t_us,
             o->gyro[0], o->gyro[1], o->gyro[2],
             o->ivme[0], o->ivme[1], o->ivme[2],
             o->roll, o->pitch, o->yaw,
             (long)o->adim[0], (long)o->adim[1],
-            o->sps[0], o->sps[1], o->hedef, o->hata, o->kp);
+            o->sps[0], o->sps[1],
+            o->hedef[0], o->hedef[1], o->hata[0], o->hata[1],
+            o->kp[0], o->kp[1], o->kmod, o->mudahale);
     }
     n += snprintf(tampon + n, sizeof(tampon) - n, "]}");
 

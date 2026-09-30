@@ -15,15 +15,20 @@
     <span id="mod" class="rozet">-</span>
     <span id="hata" class="rozet">-</span>
     <button id="hata-sil">Hatayi Temizle</button>
+    <button id="hata-sil">Hatayi Temizle</button>
     <button id="estop" class="acil">ACIL DUR</button>
   </div>
 </header>
+
+<!-- Sistemi durdurmayan sorunlar burada gorunur; 5 saniye sonra kendiliginden
+     kaybolur. Hata (kirmizi) motorlari durdurur, uyari (sari) durdurmaz. -->
+<div id="uyari" class="uyari-serit" style="display:none"></div>
 
 <nav id="sekmeler">
   <button data-sekme="cihaz" class="aktif">Cihazlar</button>
   <button data-sekme="motor">Motor</button>
   <button data-sekme="sensor">Sensor</button>
-  <button data-sekme="stab">Stabilizasyon</button>
+  <button data-sekme="stab">Otomatik Mod</button>
   <button data-sekme="kayit">Kayit</button>
   <button data-sekme="ayar">Ayarlar</button>
 </nav>
@@ -54,7 +59,7 @@
       <select id="m-rol"><option value="0">yatay (azimut)</option>
                          <option value="1">dikey (elevasyon)</option></select>
     </label>
-    <label>Jog hizi (adim/s) <input id="m-sps" type="number" value="150" min="1" max="500"></label>
+    <label>Jog hizi (derece/s) <input id="m-sps" type="number" value="10" min="0.1" max="200" step="0.5"></label>
   </div>
   <div class="satir">
     <button id="jog-geri" class="buyuk">&#9664; Geri</button>
@@ -97,35 +102,65 @@
   </p>
 </section>
 
-<!-- ------------------------------------------------------- stabilizasyon -->
+<!-- --------------------------------------------------- otomatik mod -->
 <section id="s-stab" class="sekme">
-  <h2>Stabilizasyon <span class="uyari">deneysel</span></h2>
+  <h2>Manuel / Otomatik Mod</h2>
+
   <p class="ipucu">
-    Tek eksen stabilize edilir. <b>Dikey</b> secilirse pitch, <b>yatay</b>
-    secilirse yaw korunur. Pitch yercekiminden geldigi icin once onu deneyin.
-    Acildiginda elle jog kilitlenir.
+    Sartnamenin istedigi iki mod. <b>Manuel</b>: girilen aciya gidip bekler.
+    <b>Otomatik</b>: kilitlenen hedefi sensorle korur, iki eksen birlikte.
+    Otomatik moddayken jog veya "aciya git" verirseniz bu bir <b>mudahale</b>
+    sayilir; biraktiginizda sistem hedefe geri doner ve gecen sureyi olcer
+    (sartname siniri 8 saniye).
+  </p>
+
+  <div class="satir">
+    <button id="km-manuel" class="buyuk">MANUEL</button>
+    <button id="km-oto" class="buyuk">OTOMATIK</button>
+  </div>
+  <div class="satir">
+    <button id="st-kilit">Hedefi Kilitle</button>
+    <button id="st-dusur">Takipten Dusur</button>
+  </div>
+
+  <div id="oto-durum" class="olcum"></div>
+
+  <h2 style="margin-top:18px">Eksen durumu</h2>
+  <div id="st-durum" class="olcum"></div>
+
+  <h2 style="margin-top:18px">Sartname testi: 8 saniye</h2>
+  <p class="ipucu">
+    Sistem kendi kendine ekseni kaydirir, birakir ve hedefe yeniden
+    kilitlenme suresini olcer. Jurinin onunde tekrarlanabilir bir kanit
+    uretir. Otomatik mod acik olmali.
   </p>
   <div class="satir">
     <label>Eksen
-      <select id="st-rol"><option value="1">dikey (pitch)</option>
-                          <option value="0">yatay (yaw)</option></select>
+      <select id="mt-rol"><option value="1">dikey (elevasyon)</option>
+                          <option value="0">yatay (azimut)</option></select>
     </label>
+    <label>Kaydirma (derece) <input id="mt-derece" type="number" value="15" step="1"></label>
+    <button id="mt-bas">Mudahale Testini Calistir</button>
+  </div>
+  <div id="mt-durum" class="olcum"></div>
+
+  <h2 style="margin-top:18px">Kontrolcu ayarlari</h2>
+  <div class="satir">
     <label>Kontrolcu
       <select id="st-fuzzy"><option value="1">Fuzzy-PI</option>
                             <option value="0">sabit PI</option></select>
     </label>
-    <label>Olcum acisi
-      <select id="st-olcum"><option value="1">pitch</option>
-                            <option value="0">roll</option>
-                            <option value="2">yaw</option></select>
+    <label>Olcum ekseni (yatay)
+      <select id="st-olcum-az"><option value="2">yaw</option>
+                               <option value="1">pitch</option>
+                               <option value="0">roll</option></select>
+    </label>
+    <label>Olcum ekseni (dikey)
+      <select id="st-olcum-el"><option value="1">pitch</option>
+                               <option value="0">roll</option>
+                               <option value="2">yaw</option></select>
     </label>
   </div>
-  <div class="satir">
-    <button id="st-kilit">Hedefi Kilitle</button>
-    <button id="st-ac" class="buyuk">Stabilizasyonu AC</button>
-    <button id="st-kapat" class="buyuk">KAPAT</button>
-  </div>
-  <div id="st-durum" class="olcum"></div>
   <div class="satir kucuk">
     <label>Kp min <input data-param="kp_min" type="number" step="0.5"></label>
     <label>Kp maks <input data-param="kp_maks" type="number" step="0.5"></label>
@@ -133,6 +168,11 @@
     <label>Hata olcek <input data-param="hata_olcek" type="number" step="0.5"></label>
     <label>Olu bant <input data-param="olu_bant" type="number" step="0.05"></label>
     <label>Pencere <input data-param="stab_pencere" type="number" step="1"></label>
+    <label>Sapma siniri <input data-param="stab_hata_sinir" type="number" step="1"></label>
+    <label>Kilit siniri (ms) <input data-param="kilit_sinir_ms" type="number" step="500"></label>
+  </div>
+  <div class="satir">
+    <button id="perf-sifirla">Performans Sayaclarini Sifirla</button>
   </div>
 </section>
 

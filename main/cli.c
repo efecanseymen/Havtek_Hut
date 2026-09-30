@@ -9,7 +9,8 @@
  *   jog <az|el> <+|-> [sps]     jog <az|el> stop
  *   git <az|el> <derece>        ref <az|el>     serbest <az|el>
  *   gyro                        mag <on|off>
- *   stab <on|off> [az|el]       kilit
+ *   oto <on|off>                kilit        dusur
+ *   mtest [az|el] [derece]      stab <on|off> [az|el]
  *   log <on|off>                param <ad> <deger>
  */
 
@@ -50,8 +51,17 @@ static void durum_bas(void)
                d.eksen[i].yon, (long)d.eksen[i].adim, d.eksen[i].derece,
                d.eksen[i].sps, (unsigned long)d.eksen[i].i2c_hata);
     }
-    printf("stab=%d hedef=%.2f olculen=%.2f hata=%.2f\n",
-           d.stab_acik ? 1 : 0, d.stab_hedef, d.stab_olculen, d.stab_hata);
+    printf("kmod=%s oto=%d kilitli=%d mudahale=%d\n",
+           d.kmod == KMOD_OTOMATIK ? "OTOMATIK" : "manuel",
+           d.stab_acik ? 1 : 0, d.kilitli ? 1 : 0, d.mudahale ? 1 : 0);
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        printf("  %s: hedef=%.2f olculen=%.2f hata=%.2f kp=%.2f sapma=%.2f\n",
+               r == ROL_AZ ? "az" : "el", d.stab[r].hedef, d.stab[r].olculen,
+               d.stab[r].hata, d.stab[r].kp, d.stab[r].sapma);
+    }
+    printf("kilitlenme=%lu ms (%s)  rms=%.3f maks=%.2f sure=%lu s\n",
+           (unsigned long)d.kilitlenme_ms, d.kilitlenme_ok ? "gecti" : "-",
+           d.perf_rms, d.perf_maks, (unsigned long)d.perf_sure_s);
     printf("dongu=%lu us asim=%lu log=%d satir=%lu\n",
            (unsigned long)d.dongu_us, (unsigned long)d.asim,
            d.log_acik ? 1 : 0, (unsigned long)d.log_satir);
@@ -116,6 +126,15 @@ static void satir_isle(char *satir)
         k.b   = (n >= 3) ? rol_coz(kelime[2]) : -1;
     } else if (strcmp(kelime[0], "kilit") == 0) {
         k.tip = KOMUT_STAB_KILIT;
+    } else if (strcmp(kelime[0], "oto") == 0 && n >= 2) {
+        k.tip = KOMUT_KULLANICI_MODU;
+        k.a   = (strcmp(kelime[1], "on") == 0);
+    } else if (strcmp(kelime[0], "dusur") == 0) {
+        k.tip = KOMUT_TAKIPTEN_DUS;
+    } else if (strcmp(kelime[0], "mtest") == 0) {
+        k.tip = KOMUT_MUDAHALE_TEST;
+        k.a   = (n >= 2) ? rol_coz(kelime[1]) : ROL_EL;
+        k.c   = (n >= 3) ? strtof(kelime[2], NULL) : 0.0f;
     } else if (strcmp(kelime[0], "log") == 0 && n >= 2) {
         k.tip = KOMUT_LOG;
         k.a   = (strcmp(kelime[1], "on") == 0);

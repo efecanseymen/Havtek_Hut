@@ -59,6 +59,7 @@ void hut_cfg_varsayilan(hut_cfg_t *c)
     c->maks_sps    = VARS_MAKS_SPS;
     c->ivme        = VARS_IVME;
     c->jog_sps       = VARS_JOG_SPS;
+    c->jog_dps       = VARS_JOG_DPS;
     c->baslangic_sps = VARS_BASLANGIC_SPS;
     c->tutma_torku = true;
 
@@ -71,6 +72,8 @@ void hut_cfg_varsayilan(hut_cfg_t *c)
     c->entegral_sinir  = VARS_ENTEGRAL_SINIR;
     c->stab_pencere    = VARS_STAB_PENCERE;
     c->stab_hata_sinir = VARS_STAB_HATA_SINIR;
+    c->kilit_sinir_ms  = VARS_KILIT_SINIR_MS;
+    c->mudahale_test   = VARS_MUDAHALE_TEST;
 
     c->olcum_ekseni[ROL_AZ] = OLCUM_YAW;
     c->olcum_ekseni[ROL_EL] = OLCUM_PITCH;
@@ -172,6 +175,7 @@ static const param_tanim_t PARAMLAR[] = {
     P("maks_sps",        maks_sps,        1.0f,   500.0f),
     P("ivme",            ivme,            10.0f,  5000.0f),
     P("jog_sps",         jog_sps,         1.0f,   500.0f),
+    P("jog_dps",         jog_dps,         0.1f,   200.0f),
     P("baslangic_sps",   baslangic_sps,   1.0f,   500.0f),
     P("kp_min",          kp_min,          0.0f,   200.0f),
     P("kp_maks",         kp_maks,         0.0f,   500.0f),
@@ -181,6 +185,7 @@ static const param_tanim_t PARAMLAR[] = {
     P("entegral_sinir",  entegral_sinir,  0.0f,   500.0f),
     P("stab_pencere",    stab_pencere,    1.0f,   180.0f),
     P("stab_hata_sinir", stab_hata_sinir, 1.0f,   180.0f),
+    P("mudahale_test",   mudahale_test,   1.0f,   90.0f),
     P("q_aci",           q_aci,           0.0f,   1.0f),
     P("q_bias",          q_bias,          0.0f,   1.0f),
     P("r_olcum",         r_olcum,         0.0001f, 10.0f),
@@ -210,6 +215,13 @@ bool hut_cfg_param_ayarla(hut_cfg_t *c, const char *anahtar, float deger)
     }
 
     /* Float olmayan birkac anahtar elle. */
+    if (strcmp(anahtar, "kilit_sinir_ms") == 0) {
+        if (deger < 500.0f)   deger = 500.0f;
+        if (deger > 60000.0f) deger = 60000.0f;
+        c->kilit_sinir_ms = (uint32_t)deger;
+        hut_cfg_kirlet();
+        return true;
+    }
     if (strcmp(anahtar, "fuzzy") == 0) {
         c->fuzzy = (deger != 0.0f);
         hut_cfg_kirlet();
@@ -242,19 +254,21 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
 {
     return snprintf(cikis, boyut,
         "{\"surum\":\"%s\",\"maks_sps\":%.1f,\"ivme\":%.1f,\"jog_sps\":%.1f,"
-        "\"baslangic_sps\":%.1f,"
+        "\"baslangic_sps\":%.1f,\"jog_dps\":%.2f,"
         "\"fuzzy\":%d,\"kp_min\":%.2f,\"kp_maks\":%.2f,\"ki\":%.3f,"
         "\"hata_olcek\":%.2f,\"olu_bant\":%.2f,\"entegral_sinir\":%.1f,"
         "\"stab_pencere\":%.1f,\"stab_hata_sinir\":%.1f,"
+        "\"kilit_sinir_ms\":%lu,\"mudahale_test\":%.1f,"
         "\"q_aci\":%.4f,\"q_bias\":%.4f,\"r_olcum\":%.4f,"
         "\"az_limit\":%.1f,\"el_min\":%.1f,\"el_maks\":%.1f,\"limit_aktif\":%d,"
         "\"reduktor_az\":%.3f,\"reduktor_el\":%.3f,\"tutma_torku\":%d,"
         "\"kuzey_ofset\":%.1f,\"gyro_kalibre\":%d,\"mag_kalibre\":%d,"
         "\"olcum_az\":%d,\"olcum_el\":%d}",
-        HUT_SURUM, c->maks_sps, c->ivme, c->jog_sps, c->baslangic_sps,
+        HUT_SURUM, c->maks_sps, c->ivme, c->jog_sps, c->baslangic_sps, c->jog_dps,
         c->fuzzy ? 1 : 0, c->kp_min, c->kp_maks, c->ki,
         c->hata_olcek, c->olu_bant, c->entegral_sinir,
         c->stab_pencere, c->stab_hata_sinir,
+        (unsigned long)c->kilit_sinir_ms, c->mudahale_test,
         c->q_aci, c->q_bias, c->r_olcum,
         c->az_limit, c->el_min, c->el_maks, c->limit_aktif ? 1 : 0,
         c->reduktor[ROL_AZ], c->reduktor[ROL_EL], c->tutma_torku ? 1 : 0,

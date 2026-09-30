@@ -47,25 +47,68 @@ static eksen_t  s_eksen[HUT_MAKS_SURUCU];
 static uint8_t  s_eksen_sayi;
 
 static ahrs_t     s_ahrs;
-static kontrol_t  s_kontrol;
 static imu_orneklem_t s_imu;
 static int64_t    s_imu_son_us;
 
 static sistem_modu_t s_mod = MOD_BOSTA;
 static hata_kodu_t   s_hata = HATA_YOK;
 
-static bool    s_stab_acik;
-static uint8_t s_stab_rol = ROL_EL;
-static float   s_stab_hedef;
-static float   s_stab_olculen, s_stab_hata, s_stab_sps;
-static int32_t s_stab_merkez_adim;
+/* Sistemi durdurmayan sorunlar. Operator gorsun ama is durmasin. */
+static hata_kodu_t s_uyari = HATA_YOK;
+static int64_t     s_uyari_us;
 
-/* Ters yon tespiti: eksen hareket ediyor ama hata duzelmiyorsa polarite
-   yanlis demektir. 200 ms'lik orneklerle (sapma, hata) degisimlerinin
-   isaretine bakiyoruz; ayni yonde degisiyorlarsa geri besleme POZITIF. */
-static int64_t s_ters_ornek_us;
-static float   s_ters_son_sapma, s_ters_son_hata;
-static int     s_ters_sayac;
+/* Sartnamenin istedigi iki mod. Operator secer, guc kesilse de korunmaz
+   (acilista her zaman MANUEL -- guvenli taraf). */
+static kullanici_modu_t s_kmod = KMOD_MANUEL;
+
+/*
+ * Eksen basina stabilizasyon durumu. Iki eksen ayni anda calisiyor; her
+ * eksenin kendi hedefi, kendi kontrolcusu ve kendi guvenlik sayaclari var.
+ */
+typedef struct {
+    bool      aktif;
+    float     hedef;              /* kilitlenen aci                        */
+    float     olculen, hata, sps;
+    int32_t   merkez_adim;        /* kilit anindaki eksen konumu           */
+    kontrol_t kontrol;
+
+    /* ters yon tespiti: eksen donuyor ama hata buyuyorsa polarite yanlis */
+    int64_t   ters_us;
+    float     ters_sapma, ters_hata;
+    int       ters_sayac;
+
+    /* performans: hedefe ne kadar iyi tutunuyor */
+    double    hata_kare_toplam;
+    uint32_t  hata_n;
+    float     hata_maks;
+} stab_eksen_t;
+
+static stab_eksen_t s_stab[ROL_SAYISI];
+static bool s_stab_acik;      /* en az bir eksen stabilize ediliyor        */
+static bool s_kilitli;        /* hedef kilitlendi mi                       */
+static int64_t s_perf_bas_us;
+
+/*
+ * MUDAHALE (sartname): "Anten hareket esnasinda baska bir aciya
+ * yonlendirilebilecek olup tekrardan hedefe yonelim suresi 8s olacaktir."
+ *
+ * Otomatik modda jog/git komutu gelirse stabilizasyonu askiya aliyoruz,
+ * operator birakinca yeniden devreye alip hedefe kilitlenme suresini
+ * OLCUYORUZ. Olculen sure telemetride ve log'da; 8 sn siniri gecti mi
+ * bilgisi jurinin onunde gosterilecek kanittir.
+ */
+static bool     s_mudahale;
+static int64_t  s_kilitlenme_bas_us;
+static bool     s_kilitlenme_olculuyor;
+static uint32_t s_kilitlenme_ms;
+static bool     s_kilitlenme_ok;
+
+/* Mudahale testi: sistemi kendi kendine kaydirip geri donmesini olcer. */
+static struct {
+    bool    aktif;
+    int     rol;
+    int64_t bitis_us;      /* kaydirmanin ne zaman biteceği */
+} s_mtest;
 
 static bool s_log_acik;
 static uint32_t s_log_satir;
@@ -404,11 +447,25 @@ static void mag_kal_bitir(void)
 
 /* ---------------------------------------------------------- stabilizasyon */
 
-/* Hangi IMU acisi bu ekseni temsil ediyor? Mekanik montaja bagli, o yuzden
-   ayardan okunuyor ("Eksen Tani" bunu olcup yaziyor). */
-static float stab_olcum(void)
+/*
+ * Iki eksenli otomatik takip.
+ *
+ * Tek eksen icin prensip: hedef aci kilitlenir, IMU o ekseni temsil eden
+ * aciyi okur, fark (hata) Fuzzy-PI'ye verilir, cikan hiz komutu motora gider.
+ * Iki eksende ayni sey bagimsiz iki kontrolcuyle yapiliyor -- azimut ve
+ * elevasyon birbirini beklemiyor.
+ *
+ * Neden bagimsiz: eksenler mekanik olarak birbirine bagli degil ve platform
+ * hareket zarfi kucuk (+-8 derece). Cakisma terimlerini modellemek bu olcekte
+ * olculebilir kazanc getirmiyor, ama iki ayri dongu tezgahta ayri ayri
+ * ayarlanabildigi icin cok daha kolay.
+ */
+
+/* Hangi IMU acisi bu ekseni temsil ediyor? Mekanik montaja bagli, ayardan
+   okunuyor ("Eksen Tani" bunu olcup yaziyor). */
+static float olcum_oku(int rol)
 {
-    uint8_t eksen = g_cfg.olcum_ekseni[s_stab_rol < ROL_SAYISI ? s_stab_rol : 0];
+    uint8_t eksen = g_cfg.olcum_ekseni[(rol >= 0 && rol < ROL_SAYISI) ? rol : 0];
 
     switch (eksen) {
     case OLCUM_ROLL:  return s_ahrs.roll;
@@ -427,162 +484,365 @@ static const char *olcum_adi(uint8_t e)
     }
 }
 
-/* Olculen aci 360 derecede doniyor mu? Yalnizca yaw icin evet. */
-static bool olcum_sarmali(void)
+/* Olculen aci 360 derecede sariyor mu? Yalnizca yaw icin evet. */
+static bool olcum_sarmali(int rol)
 {
-    return g_cfg.olcum_ekseni[s_stab_rol < ROL_SAYISI ? s_stab_rol : 0]
+    return g_cfg.olcum_ekseni[(rol >= 0 && rol < ROL_SAYISI) ? rol : 0]
            == OLCUM_YAW;
 }
 
-static void stab_kilitle(void)
+static const char *rol_adi(int rol)
 {
-    s_stab_hedef = stab_olcum();
-    int i = eksen_bul_rol(s_stab_rol);
-    s_stab_merkez_adim = (i >= 0) ? s_eksen[i].adim : 0;
-    kontrol_sifirla(&s_kontrol);
-
-    s_ters_ornek_us  = esp_timer_get_time();
-    s_ters_son_sapma = 0.0f;
-    s_ters_son_hata  = 0.0f;
-    s_ters_sayac     = 0;
-
-    ESP_LOGI(TAG, "hedef kilitlendi: %.2f derece (%s)", s_stab_hedef,
-             olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]));
+    return (rol == ROL_AZ) ? "yatay" : "dikey";
 }
 
-static void stab_ac(bool ac, int rol)
+/* Sistemi durdurmayan sorun: operator gorsun ama is durmasin. */
+static void uyar(hata_kodu_t kod)
+{
+    s_uyari    = kod;
+    s_uyari_us = esp_timer_get_time();
+}
+
+static void perf_sifirla(void)
+{
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        s_stab[r].hata_kare_toplam = 0.0;
+        s_stab[r].hata_n           = 0;
+        s_stab[r].hata_maks        = 0.0f;
+    }
+    s_perf_bas_us = esp_timer_get_time();
+}
+
+/*
+ * Hedefi kilitle: o anki acilar korunacak acilar olur.
+ *
+ * Yarisma senaryosu tam olarak bu: lazer hedef cemberin merkezine getirilir,
+ * operator kilitler, sonra platform hareket etmeye baslar.
+ */
+static void hedef_kilitle(void)
+{
+    int64_t simdi = esp_timer_get_time();
+
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        int i = eksen_bul_rol(r);
+
+        s_stab[r].hedef       = olcum_oku(r);
+        s_stab[r].olculen     = s_stab[r].hedef;
+        s_stab[r].hata        = 0.0f;
+        s_stab[r].sps         = 0.0f;
+        s_stab[r].merkez_adim = (i >= 0) ? s_eksen[i].adim : 0;
+        kontrol_sifirla(&s_stab[r].kontrol);
+
+        s_stab[r].ters_us     = simdi;
+        s_stab[r].ters_sapma  = 0.0f;
+        s_stab[r].ters_hata   = 0.0f;
+        s_stab[r].ters_sayac  = 0;
+
+        ESP_LOGI(TAG, "kilit %s: %.2f derece (%s ekseni)", rol_adi(r),
+                 s_stab[r].hedef, olcum_adi(g_cfg.olcum_ekseni[r]));
+    }
+    s_kilitli = true;
+    perf_sifirla();
+}
+
+/* Tek eksenin bir kontrol dilimi. Guvenlik ihlalinde false doner. */
+static bool stab_eksen_calistir(int rol, float dt, int64_t simdi_us)
+{
+    stab_eksen_t *st = &s_stab[rol];
+    int i = eksen_bul_rol(rol);
+
+    if (i < 0) {
+        st->aktif = false;
+        return true;             /* surucu yok: bu eksen sessizce atlanir */
+    }
+
+    eksen_t *e = &s_eksen[i];
+
+    st->olculen = olcum_oku(rol);
+    st->hata    = st->hedef - st->olculen;
+
+    if (olcum_sarmali(rol)) {
+        if (st->hata >  180.0f) st->hata -= 360.0f;
+        if (st->hata < -180.0f) st->hata += 360.0f;
+    }
+
+    float mutlak = fabsf(st->hata);
+
+    /* performans birikimi */
+    st->hata_kare_toplam += (double)mutlak * (double)mutlak;
+    st->hata_n++;
+    if (mutlak > st->hata_maks) {
+        st->hata_maks = mutlak;
+    }
+
+    /* --- Guvenlik 1: sapma siniri --- */
+    if (mutlak > g_cfg.stab_hata_sinir) {
+        ESP_LOGE(TAG, "%s: sapma siniri asildi (%.1f derece)", rol_adi(rol),
+                 st->hata);
+        hataya_dus(HATA_SAPMA);
+        return false;
+    }
+
+    float reduktor = rol_reduktor(rol);
+    float adim_der = EKSEN_MOTOR_DERECE_ADIM / reduktor;
+    float merkez   = (float)st->merkez_adim * adim_der;
+    float sapma    = eksen_derece(e, reduktor) - merkez;
+
+    /*
+     * --- Guvenlik 2: TERS YON ---
+     * Polarite dogruysa eksen ilerledikce hata kuculur. Ikisi ayni yonde
+     * degisiyorsa geri besleme pozitiftir: motor hatayi buyuterek kacar.
+     * Bunu "limit hatasi" diye bildirmek operatoru yanlis yere bakmaya iter.
+     * 200 ms araliklarla ve ust uste 3 kez istiyoruz -- elle egmek de hatayi
+     * buyutur ama eksen hareketiyle tutarli bir iliski uretmez.
+     */
+    if (simdi_us - st->ters_us >= 200000) {
+        float d_sapma = sapma - st->ters_sapma;
+        float d_hata  = mutlak - fabsf(st->ters_hata);
+
+        if (fabsf(d_sapma) > 0.5f && d_hata > 0.1f && mutlak > 2.0f) {
+            st->ters_sayac++;
+        } else {
+            st->ters_sayac = 0;
+        }
+        st->ters_sapma = sapma;
+        st->ters_hata  = st->hata;
+        st->ters_us    = simdi_us;
+
+        if (st->ters_sayac >= 3) {
+            ESP_LOGE(TAG, "%s TERS YON: eksen %.1f derece dondu ama hata "
+                     "%.1f dereceye BUYUDU", rol_adi(rol), sapma, st->hata);
+            ESP_LOGE(TAG, "Yapilacak: Cihazlar sekmesinde bu eksen icin");
+            ESP_LOGE(TAG, "'Yonu Ters' deyin ve hedefi tekrar kilitleyin.");
+            ESP_LOGE(TAG, "Ikinci ihtimal: olcum ekseni yanlis (%s secili).",
+                     olcum_adi(g_cfg.olcum_ekseni[rol]));
+            hataya_dus(HATA_TERS_YON);
+            return false;
+        }
+    }
+
+    /* --- Guvenlik 3: calisma penceresi --- */
+    if (fabsf(sapma) > g_cfg.stab_pencere) {
+        ESP_LOGE(TAG, "%s: calisma penceresi disina cikildi (%.1f derece, "
+                 "sinir %.0f)", rol_adi(rol), sapma, g_cfg.stab_pencere);
+        hataya_dus(HATA_LIMIT);
+        return false;
+    }
+
+    st->sps = kontrol_hesapla(&st->kontrol, st->hata, dt, reduktor);
+    eksen_hiz(e, st->sps);
+    st->aktif = true;
+    return true;
+}
+
+/* Otomatik takibi baslat/bitir. */
+static void otomatik_ac(bool ac)
 {
     if (!ac) {
+        for (int r = 0; r < ROL_SAYISI; r++) {
+            s_stab[r].aktif = false;
+            s_stab[r].sps   = 0.0f;
+        }
         s_stab_acik = false;
+        s_mudahale  = false;
+        s_kilitlenme_olculuyor = false;
+        s_mtest.aktif = false;
         hepsini_durdur();
         if (s_mod == MOD_STAB) {
             s_mod = MOD_BOSTA;
         }
+        ESP_LOGI(TAG, "otomatik takip kapandi");
         return;
     }
 
     if (!s_imu.gecerli) {
         s_hata = HATA_IMU_YOK;
-        ESP_LOGW(TAG, "IMU yok, stabilizasyon acilamaz");
+        ESP_LOGW(TAG, "IMU yok, otomatik moda gecilemez");
         return;
     }
-    if (rol >= 0) {
-        s_stab_rol = (uint8_t)rol;
-    }
-    if (eksen_bul_rol(s_stab_rol) < 0) {
-        /* Tezgahta tek motorla calisirken panelde secilen rol ile takili
-           surucunun rolu tutmuyorsa is durmasin: tek eksen varsa onu kullan
-           ve hangisini sectigimizi acikca soyle. */
-        if (s_eksen_sayi == 1 && s_eksen[0].var) {
-            s_stab_rol = s_eksen[0].rol;
-            ESP_LOGW(TAG, "secilen rolde surucu yok; tek takili eksen (%s) "
-                     "kullaniliyor", s_stab_rol == ROL_AZ ? "yatay" : "dikey");
-        } else {
-            s_hata = HATA_SURUCU_YOK;
-            ESP_LOGW(TAG, "%s rolunde surucu yok, stabilizasyon acilamaz",
-                     s_stab_rol == ROL_AZ ? "yatay" : "dikey");
-            return;
-        }
+    if (s_eksen_sayi == 0) {
+        s_hata = HATA_SURUCU_YOK;
+        ESP_LOGW(TAG, "surucu yok, otomatik moda gecilemez");
+        return;
     }
     if (!g_cfg.gyro_kalibre) {
         ESP_LOGW(TAG, "gyro kalibre edilmemis -- yaw hizla kayacak");
+        uyar(HATA_IMU_YOK);
     }
 
-    stab_kilitle();
+    /* Hedef daha once kilitlenmediyse simdiki aci hedef olur. */
+    if (!s_kilitli) {
+        hedef_kilitle();
+    } else {
+        for (int r = 0; r < ROL_SAYISI; r++) {
+            kontrol_sifirla(&s_stab[r].kontrol);
+        }
+        perf_sifirla();
+    }
+
     s_stab_acik = true;
+    s_mudahale  = false;
     s_mod = MOD_STAB;
 
-    /* Acilis ozeti: sonradan "hangi ayarla calisiyordu" sorusuna cevap. */
-    ESP_LOGI(TAG, "STABILIZASYON ACIK -- eksen=%s olcum=%s reduktor=%.2f",
-             s_stab_rol == ROL_AZ ? "yatay" : "dikey",
-             olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]),
-             rol_reduktor(s_stab_rol));
-    ESP_LOGI(TAG, "  pencere=%.0f derece  sapma siniri=%.0f derece  "
-             "maks hiz=%.0f adim/s", g_cfg.stab_pencere,
-             g_cfg.stab_hata_sinir, g_cfg.maks_sps);
+    ESP_LOGI(TAG, "OTOMATIK TAKIP ACIK");
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        int i = eksen_bul_rol(r);
+        ESP_LOGI(TAG, "  %s: %s  hedef=%.2f  olcum=%s  reduktor=%.2f",
+                 rol_adi(r), (i >= 0) ? "surucu var" : "SURUCU YOK",
+                 s_stab[r].hedef, olcum_adi(g_cfg.olcum_ekseni[r]),
+                 rol_reduktor(r));
+    }
+    ESP_LOGI(TAG, "  pencere=%.0f  sapma siniri=%.0f  maks hiz=%.0f adim/s  "
+             "kilit siniri=%lu ms", g_cfg.stab_pencere, g_cfg.stab_hata_sinir,
+             g_cfg.maks_sps, (unsigned long)g_cfg.kilit_sinir_ms);
 }
 
-static void stab_calistir(float dt, int64_t simdi_us)
+/*
+ * Operator otomatik modda elle mudahale etti: takibi askiya al.
+ * Bu bir hata degil, sartnamenin istedigi bir yetenek.
+ */
+static void mudahale_basla(void)
 {
-    int i = eksen_bul_rol(s_stab_rol);
+    if (s_mudahale) {
+        return;
+    }
+    s_mudahale = true;
+    s_kilitlenme_olculuyor = false;
+
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        s_stab[r].aktif = false;
+        s_stab[r].sps   = 0.0f;
+        kontrol_sifirla(&s_stab[r].kontrol);
+    }
+    ESP_LOGI(TAG, "mudahale: takip askiya alindi");
+}
+
+/* Operator birakti: takibi geri al, hedefe kilitlenme suresini olcmeye basla. */
+static void mudahale_bitir(void)
+{
+    if (!s_mudahale) {
+        return;
+    }
+    s_mudahale = false;
+
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        kontrol_sifirla(&s_stab[r].kontrol);
+    }
+
+    s_kilitlenme_bas_us    = esp_timer_get_time();
+    s_kilitlenme_olculuyor = true;
+    s_kilitlenme_ms        = 0;
+    ESP_LOGI(TAG, "mudahale bitti, yeniden kilitlenme olculuyor (sinir %lu ms)",
+             (unsigned long)g_cfg.kilit_sinir_ms);
+}
+
+/*
+ * Yeniden kilitlenme olcumu.
+ *
+ * Kriter: TUM takili eksenlerin hatasi olu bandin iki katinin altina insin.
+ * Olu bandin kendisini kullanmak olcumu gurultuye acik yapardi; iki kati
+ * "operator gozuyle hedefte" demek icin makul bir esik.
+ */
+static void kilitlenme_izle(int64_t simdi_us)
+{
+    if (!s_kilitlenme_olculuyor) {
+        return;
+    }
+
+    bool  hepsi_hedefte = true;
+    int   sayilan = 0;
+    float esik = g_cfg.olu_bant * 2.0f;
+
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        if (eksen_bul_rol(r) < 0) {
+            continue;
+        }
+        sayilan++;
+        if (fabsf(s_stab[r].hata) > esik) {
+            hepsi_hedefte = false;
+        }
+    }
+
+    uint32_t gecen = (uint32_t)((simdi_us - s_kilitlenme_bas_us) / 1000);
+
+    if (sayilan > 0 && hepsi_hedefte) {
+        s_kilitlenme_ms        = gecen;
+        s_kilitlenme_ok        = (gecen <= g_cfg.kilit_sinir_ms);
+        s_kilitlenme_olculuyor = false;
+        ESP_LOGI(TAG, "yeniden kilitlenme: %lu ms -- %s", (unsigned long)gecen,
+                 s_kilitlenme_ok ? "GECTI" : "SINIR ASILDI");
+        return;
+    }
+
+    /* Sinirin iki katini gectiyse olcumu bitir: sonsuza kadar "olculuyor"
+       yazip beklemek operatoru yanlis bilgilendirir. */
+    if (gecen > g_cfg.kilit_sinir_ms * 2) {
+        s_kilitlenme_ms        = gecen;
+        s_kilitlenme_ok        = false;
+        s_kilitlenme_olculuyor = false;
+        ESP_LOGW(TAG, "yeniden kilitlenme %lu ms icinde tamamlanmadi",
+                 (unsigned long)gecen);
+    }
+}
+
+/*
+ * MUDAHALE TESTI -- sartnamenin 8 saniye maddesini tekrarlanabilir sekilde
+ * gostermek icin.
+ *
+ * Akis: ekseni verilen aci kadar kaydir (mudahale gibi davran), 1 saniye
+ * bekle, birak, yeniden kilitlenme suresini olc. Sonuc telemetride.
+ */
+static void mudahale_testi_basla(int rol, float derece)
+{
+    if (!s_stab_acik) {
+        ESP_LOGW(TAG, "mudahale testi icin once otomatik moda gec");
+        return;
+    }
+    int i = eksen_bul_rol(rol);
     if (i < 0) {
-        hataya_dus(HATA_SURUCU_YOK);
+        ESP_LOGW(TAG, "%s rolunde surucu yok", rol_adi(rol));
+        return;
+    }
+    if (derece < 1.0f) {
+        derece = g_cfg.mudahale_test;
+    }
+
+    mudahale_basla();
+
+    int32_t hedef_adim = s_eksen[i].adim +
+                         eksen_derece_adim(derece, rol_reduktor(rol));
+    eksen_git(&s_eksen[i], hedef_adim);
+
+    s_mtest.aktif    = true;
+    s_mtest.rol      = rol;
+    s_mtest.bitis_us = 0;
+
+    ESP_LOGI(TAG, "MUDAHALE TESTI: %s ekseni %.1f derece kaydiriliyor",
+             rol_adi(rol), derece);
+}
+
+static void mudahale_testi_isle(int64_t simdi_us)
+{
+    if (!s_mtest.aktif) {
+        return;
+    }
+    int i = eksen_bul_rol(s_mtest.rol);
+    if (i < 0) {
+        s_mtest.aktif = false;
         return;
     }
 
-    eksen_t *e = &s_eksen[i];
-
-    s_stab_olculen = stab_olcum();
-    s_stab_hata    = s_stab_hedef - s_stab_olculen;
-
-    /* Yaw'da -180/+180 gecisini kisa yoldan gec. Roll/pitch sarmaz. */
-    if (olcum_sarmali()) {
-        if (s_stab_hata >  180.0f) s_stab_hata -= 360.0f;
-        if (s_stab_hata < -180.0f) s_stab_hata += 360.0f;
-    }
-
-    /* Guvenlik 1: hata siniri. Genelde "yanlis eksen secildi" ya da
-       "motor adim kaciriyor" demek. */
-    if (fabsf(s_stab_hata) > g_cfg.stab_hata_sinir) {
-        ESP_LOGE(TAG, "sapma siniri asildi (%.1f derece)", s_stab_hata);
-        hataya_dus(HATA_SAPMA);
-        return;
-    }
-
-    float reduktor = rol_reduktor(s_stab_rol);
-    float merkez_der = (float)s_stab_merkez_adim *
-                       (EKSEN_MOTOR_DERECE_ADIM / reduktor);
-    float sapma = eksen_derece(e, reduktor) - merkez_der;
-
-    /*
-     * Guvenlik 2: TERS YON tespiti.
-     *
-     * Kontrolcu hatayi kapatmak icin ekseni cevirir. Polarite dogruysa eksen
-     * ilerledikce hata kuculuyor olmali. Ikisi AYNI yonde degisiyorsa geri
-     * besleme pozitiftir: motor hatayi buyuterek kacar ve saniyeler icinde
-     * pencereye carpar. Bunu "limit hatasi" diye bildirmek kullaniciyi yanlis
-     * yere bakmaya iter; o yuzden once burada yakaliyoruz.
-     *
-     * 200 ms'lik orneklerle bakiyoruz ve ust uste 3 ornek istiyoruz: elle
-     * platformu egmek de hatayi buyutur ama eksen hareketiyle ayni yonde
-     * tutarli bir iliski uretmez.
-     */
-    if (simdi_us - s_ters_ornek_us >= 200000) {
-        float d_sapma = sapma - s_ters_son_sapma;
-        float d_hata  = fabsf(s_stab_hata) - fabsf(s_ters_son_hata);
-
-        if (fabsf(d_sapma) > 0.5f && d_hata > 0.1f && fabsf(s_stab_hata) > 2.0f) {
-            s_ters_sayac++;
-        } else {
-            s_ters_sayac = 0;
+    /* Kaydirma bitti mi? Bittiyse 1 saniye bekle, sonra birak. */
+    if (s_mtest.bitis_us == 0) {
+        if (!s_eksen[i].git_aktif) {
+            s_mtest.bitis_us = simdi_us + 1000000;
         }
-
-        s_ters_son_sapma = sapma;
-        s_ters_son_hata  = s_stab_hata;
-        s_ters_ornek_us  = simdi_us;
-
-        if (s_ters_sayac >= 3) {
-            ESP_LOGE(TAG, "TERS YON: eksen %.1f derece dondu ama hata "
-                     "%.1f dereceye BUYUDU", sapma, s_stab_hata);
-            ESP_LOGE(TAG, "Yapilacak: Cihazlar sekmesinde bu eksen icin");
-            ESP_LOGE(TAG, "'Yonu Ters' deyin, sonra hedefi tekrar kilitleyin.");
-            ESP_LOGE(TAG, "Ikinci ihtimal: olcum ekseni yanlis (%s secili).",
-                     olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]));
-            hataya_dus(HATA_TERS_YON);
-            return;
-        }
-    }
-
-    /* Guvenlik 3: calisma penceresi. Eksen referanstan fazla uzaklasmasin. */
-    if (fabsf(sapma) > g_cfg.stab_pencere) {
-        ESP_LOGE(TAG, "calisma penceresi disina cikildi (%.1f derece, sinir %.0f)",
-                 sapma, g_cfg.stab_pencere);
-        hataya_dus(HATA_LIMIT);
         return;
     }
-
-    s_stab_sps = kontrol_hesapla(&s_kontrol, s_stab_hata, dt, reduktor);
-    eksen_hiz(e, s_stab_sps);
+    if (simdi_us >= s_mtest.bitis_us) {
+        s_mtest.aktif = false;
+        mudahale_bitir();
+    }
 }
 
 /* ------------------------------------------------------------- komutlar */
@@ -653,18 +913,29 @@ static void komut_uygula(const komut_t *k)
         break;
 
     case KOMUT_JOG:
-        if (s_stab_acik) {
-            break;                  /* stabilizasyon acikken elle surme yok */
-        }
         i = eksen_bul_rol(k->a);
         if (i < 0) {
             s_hata = HATA_SURUCU_YOK;
             break;
         }
+        /*
+         * Otomatik moddayken jog gelmesi bir hata degil: sartname "anten
+         * hareket esnasinda baska bir aciya yonlendirilebilecek" diyor.
+         * Takibi askiya aliyoruz, birakildiginda geri aliyoruz.
+         */
+        if (s_stab_acik) {
+            mudahale_basla();
+        }
         {
-            float hiz = (k->c > 0.0f) ? k->c : g_cfg.jog_sps;
-            eksen_hiz(&s_eksen[i], (k->b < 0) ? -hiz : hiz);
-            s_mod = MOD_JOG;
+            /* Arayuz hizi DERECE/S olarak yolluyor; adim/s'ye burada
+               ceviriyoruz. Boylece disli orani degisince komutlar degismiyor. */
+            float dps = (k->c > 0.0f) ? k->c : g_cfg.jog_dps;
+            float sps = dps * rol_reduktor(k->a) / EKSEN_MOTOR_DERECE_ADIM;
+
+            eksen_hiz(&s_eksen[i], (k->b < 0) ? -sps : sps);
+            if (!s_stab_acik) {
+                s_mod = MOD_JOG;
+            }
         }
         break;
 
@@ -676,19 +947,29 @@ static void komut_uygula(const komut_t *k)
         if (s_mod == MOD_JOG) {
             s_mod = MOD_BOSTA;
         }
+        /* Otomatik modda: operator birakti, hedefe geri don ve sureyi olc. */
+        if (s_stab_acik && s_mudahale) {
+            mudahale_bitir();
+        }
         break;
 
     case KOMUT_GIT:
-        if (s_stab_acik) {
-            break;
-        }
         i = eksen_bul_rol(k->a);
         if (i < 0) {
             s_hata = HATA_SURUCU_YOK;
             break;
         }
+        /* Otomatik modda aciya gitmek de mudahaledir: hareket bitince
+           kendiliginden hedefe donulur. */
+        if (s_stab_acik) {
+            mudahale_basla();
+            s_mtest.aktif    = true;     /* bitisini ayni makine izliyor */
+            s_mtest.rol      = k->a;
+            s_mtest.bitis_us = 0;
+        } else {
+            s_mod = MOD_GIT;
+        }
         eksen_git(&s_eksen[i], eksen_derece_adim(k->c, rol_reduktor(k->a)));
-        s_mod = MOD_GIT;
         break;
 
     case KOMUT_DUR:
@@ -703,8 +984,16 @@ static void komut_uygula(const komut_t *k)
         break;
 
     case KOMUT_HATA_SIL:
-        s_hata = HATA_YOK;
-        s_mod  = MOD_BOSTA;
+        s_hata  = HATA_YOK;
+        s_uyari = HATA_YOK;
+        s_mod   = MOD_BOSTA;
+        /*
+         * Hatadan cikinca MANUEL'e dusuyoruz. Otomatik moda geri donmeyi
+         * operatorun bilincli olarak istemesi gerekir: hatanin sebebi
+         * duzelmediyse sistem aninda ayni hataya girer.
+         */
+        s_kmod = KMOD_MANUEL;
+        ESP_LOGI(TAG, "hata temizlendi, manuel moda dusuldu");
         break;
 
     case KOMUT_REFERANS:
@@ -736,11 +1025,13 @@ static void komut_uygula(const komut_t *k)
         break;
 
     case KOMUT_STAB:
-        stab_ac(k->a != 0, k->b);
+        /* Eski tek eksen komutu: artik otomatik modu aciyor/kapatiyor. */
+        otomatik_ac(k->a != 0);
+        s_kmod = (k->a != 0) ? KMOD_OTOMATIK : KMOD_MANUEL;
         break;
 
     case KOMUT_STAB_KILIT:
-        stab_kilitle();
+        hedef_kilitle();
         break;
 
     case KOMUT_LIMIT_OGRET: {
@@ -796,6 +1087,37 @@ static void komut_uygula(const komut_t *k)
         }
         break;
 
+    case KOMUT_KULLANICI_MODU:
+        if (k->a) {
+            otomatik_ac(true);
+            if (s_stab_acik) {
+                s_kmod = KMOD_OTOMATIK;
+            }
+        } else {
+            otomatik_ac(false);
+            s_kmod = KMOD_MANUEL;
+        }
+        break;
+
+    case KOMUT_TAKIPTEN_DUS:
+        /* Sartname: "takip modunu durdurarak". Hedef kilidi KORUNUR ki
+           operator tekrar otomatige basinca ayni noktaya donsun. */
+        otomatik_ac(false);
+        s_kmod = KMOD_MANUEL;
+        ESP_LOGI(TAG, "takipten dusuruldu (hedef kilidi korunuyor)");
+        break;
+
+    case KOMUT_MUDAHALE_TEST:
+        mudahale_testi_basla((k->a >= 0 && k->a < ROL_SAYISI) ? k->a : ROL_EL,
+                             k->c);
+        break;
+
+    case KOMUT_PERF_SIFIRLA:
+        perf_sifirla();
+        s_kilitlenme_ms = 0;
+        s_kilitlenme_ok = false;
+        break;
+
     case KOMUT_LOG:
         s_log_acik = (k->a != 0);
         if (s_log_acik) {
@@ -842,12 +1164,52 @@ static void durum_yayinla(int64_t simdi, uint32_t dongu_us)
     }
 
     d.stab_acik    = s_stab_acik;
-    d.stab_rol     = s_stab_rol;
-    d.stab_hedef   = s_stab_hedef;
-    d.stab_olculen = s_stab_olculen;
-    d.stab_hata    = s_stab_hata;
-    d.stab_kp      = kontrol_son_kp(&s_kontrol);
-    d.stab_sps     = s_stab_sps;
+    d.kmod     = s_kmod;
+    d.uyari    = s_uyari;
+    d.kilitli  = s_kilitli;
+    d.mudahale = s_mudahale;
+
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        int idx = eksen_bul_rol(r);
+        float reduktor = rol_reduktor(r);
+        float merkez = (float)s_stab[r].merkez_adim *
+                       (EKSEN_MOTOR_DERECE_ADIM / reduktor);
+
+        d.stab[r].aktif      = s_stab[r].aktif;
+        d.stab[r].surucu_var = (idx >= 0);
+        d.stab[r].hedef      = s_stab[r].hedef;
+        d.stab[r].olculen    = s_stab[r].olculen;
+        d.stab[r].hata       = s_stab[r].hata;
+        d.stab[r].kp         = kontrol_son_kp(&s_stab[r].kontrol);
+        d.stab[r].sps        = s_stab[r].sps;
+        d.stab[r].sapma      = (idx >= 0)
+                               ? eksen_derece(&s_eksen[idx], reduktor) - merkez
+                               : 0.0f;
+        d.stab[r].olcum      = g_cfg.olcum_ekseni[r];
+    }
+
+    d.kilitlenme_ms        = s_kilitlenme_ms;
+    d.kilitlenme_ok        = s_kilitlenme_ok;
+    d.kilitlenme_olculuyor = s_kilitlenme_olculuyor;
+
+    /* Performans: iki eksenin birlesik RMS'i ve en buyuk hatasi. */
+    {
+        double kare = 0.0;
+        uint32_t n = 0;
+        float maks = 0.0f;
+
+        for (int r = 0; r < ROL_SAYISI; r++) {
+            kare += s_stab[r].hata_kare_toplam;
+            n    += s_stab[r].hata_n;
+            if (s_stab[r].hata_maks > maks) {
+                maks = s_stab[r].hata_maks;
+            }
+        }
+        d.perf_rms    = (n > 0) ? (float)sqrt(kare / (double)n) : 0.0f;
+        d.perf_maks   = maks;
+        d.perf_sure_s = (s_perf_bas_us > 0)
+                        ? (uint32_t)((simdi - s_perf_bas_us) / 1000000) : 0;
+    }
 
     d.mag_kalibre_suruyor = s_mag_kal;
     d.mag_orneklem        = s_mag_n;
@@ -877,9 +1239,13 @@ static void logla(int64_t simdi)
         o.adim[rol] = s_eksen[i].adim;
         o.sps[rol]  = s_eksen[i].anlik_sps;
     }
-    o.hedef = s_stab_hedef;
-    o.hata  = s_stab_hata;
-    o.kp    = kontrol_son_kp(&s_kontrol);
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        o.hedef[r] = s_stab[r].hedef;
+        o.hata[r]  = s_stab[r].hata;
+        o.kp[r]    = kontrol_son_kp(&s_stab[r].kontrol);
+    }
+    o.kmod     = (uint8_t)s_kmod;
+    o.mudahale = s_mudahale ? 1 : 0;
 
     hut_log_yaz(&o);
     s_log_satir++;
@@ -920,12 +1286,35 @@ static void kontrol_dilimi(int64_t simdi, float dt)
     /* --- eksen tani --- */
     tani_isle(simdi);
 
-    /* --- stabilizasyon --- */
-    if (s_stab_acik && s_mod == MOD_STAB) {
-        stab_calistir(dt, simdi);
+    /* --- otomatik takip: iki eksen bagimsiz --- */
+    if (s_stab_acik && s_mod == MOD_STAB && !s_mudahale) {
+        for (int r = 0; r < ROL_SAYISI; r++) {
+            if (!stab_eksen_calistir(r, dt, simdi)) {
+                break;          /* guvenlik ihlali: hata durumuna gecildi */
+            }
+        }
+        kilitlenme_izle(simdi);
     }
 
-    /* --- GIT bitti mi --- */
+    /* --- mudahale testi ve GIT tabanli mudahalenin bitisi --- */
+    mudahale_testi_isle(simdi);
+
+    /* --- uyarilar 5 saniye sonra kendiliginden dusuyor --- */
+    if (s_uyari != HATA_YOK && simdi - s_uyari_us > 5000000) {
+        s_uyari = HATA_YOK;
+    }
+
+    /* --- eksen limitine dayanma: hata degil UYARI --- */
+    for (int r = 0; r < s_eksen_sayi; r++) {
+        if (s_eksen[r].limit_vurdu) {
+            uyar(HATA_LIMIT);
+        }
+        if (s_eksen[r].i2c_hata > 0 && s_eksen[r].i2c_hata < 20) {
+            uyar(HATA_I2C);
+        }
+    }
+
+    /* --- GIT bitti mi (manuel modda) --- */
     if (s_mod == MOD_GIT) {
         bool suren = false;
         for (int i = 0; i < s_eksen_sayi; i++) {
@@ -952,7 +1341,9 @@ static void rt_gorev(void *arg)
     (void)i2c_hub_baslat(1, PIN_I2C2_SDA, PIN_I2C2_SCL);
 
     ahrs_baslat(&s_ahrs);
-    kontrol_sifirla(&s_kontrol);
+    for (int r = 0; r < ROL_SAYISI; r++) {
+        kontrol_sifirla(&s_stab[r].kontrol);
+    }
 
     if (imu_baslat() != ESP_OK) {
         ESP_LOGW(TAG, "IMU olmadan devam ediliyor (sadece motor kontrolu)");

@@ -1,9 +1,9 @@
-# HAVTEK — Hareketli Uydu Terminali (v0.1)
+# HAVTEK — Hareketli Uydu Terminali (v0.2)
 
 Teknofest 2026 Hareketli Uydu Terminali yarışması için ESP-IDF tabanlı
 Deneyap Kart v2 (ESP32-S3) yazılımı.
 
-**v0.1'in amacı stabilizasyonu bitirmek değil, onu tasarlamak için gereken
+**v0.1'in amacıydı stabilizasyonu bitirmek değil, onu tasarlamak için gereken
 ölçümleri toplamak.** Motorlar güvenle sürülüyor, IMU 100 Hz'de okunuyor,
 her şey CSV olarak indirilebiliyor ve tek eksende deneysel bir stabilizasyon
 denenebiliyor.
@@ -23,10 +23,10 @@ Açılışta kart hareketsizse gyro kalibrasyonu otomatik başlar (3 saniye).
 
 **Var:** I2C taraması ve cihaz keşfi, sürücü rol atama, "Eksen Tanı", jog ve
 açıya git, hız rampası, yazılım limitleri, referans ayarlama, IMU okuma,
-gyro/manyetometre kalibrasyonu, tek eksenli stabilizasyon (PI ve Fuzzy-PI),
+gyro/manyetometre kalibrasyonu, **Manuel/Otomatik mod, iki eksenli stabilizasyon**, müdahale ve 8 saniye testi, (PI ve Fuzzy-PI),
 100 Hz log + CSV indirme, acil durdurma, hata yönetimi, seri komut satırı.
 
-**Yok (sonraki sürümler):** iki eksenli birleşik takip, hedef noktası ve
+**Yok (sonraki sürümler):** hedef noktası ve
 paralaks düzeltmesi, uydu (Türksat) hesabı, GPS, homing sensörü, dişli
 boşluğu telafisi.
 
@@ -108,6 +108,75 @@ Acil durdurma her istemciye açıktır.
   motorun bağlı olduğunu ya arayüzden seçersiniz ya da "Eksen Tanı" birkaç adım
   atıp IMU'da hangi açının değiştiğine bakar. Arayüz eksenleri adresle değil
   telemetrideki sırayla gösterir (iki sürücü aynı adreste olabilir).
+
+## Manuel / Otomatik mod (v0.2)
+
+Şartnamenin istediği iki kullanıcı modu. Arayüzde **Otomatik Mod** sekmesinden
+seçilir.
+
+| Mod | Ne yapar |
+|---|---|
+| **MANUEL** | Jog ve "açıya git" komutları uygulanır, sistem gittiği yerde bekler. Stabilizasyon kapalı. |
+| **OTOMATİK** | Kilitlenen hedef sensörle korunur. **İki eksen birlikte**, bağımsız iki Fuzzy-PI döngüsüyle. |
+
+### Müdahale (şartname: 8 saniye)
+
+Otomatik moddayken jog veya "açıya git" vermek hata değildir — şartnamenin
+istediği yetenektir: *"Anten hareket esnasında başka bir açıya
+yönlendirilebilecek olup tekrardan hedefe yönelim süresi 8s olacaktır."*
+
+Akış: komut gelince takip askıya alınır (`müdahale`), bıraktığınızda takip geri
+alınır ve **hedefe yeniden kilitlenme süresi ölçülür**. Ölçüm arayüzde ve
+log'da; sınır `kilit_sinir_ms` (varsayılan 8000).
+
+Kilitlenme kriteri: takılı tüm eksenlerin hatası ölü bandın iki katının altına
+insin.
+
+### Takipten düşürme
+
+"Takipten Düşür" otomatik takibi kapatır ama **hedef kilidini korur**; tekrar
+OTOMATİK'e bastığınızda aynı noktaya döner.
+
+### Otomatik mod testi — adım adım
+
+1. IMU'nun **hareket eden gövdeye monteli** olduğundan emin olun. Masada duran
+   IMU ile otomatik mod çalışmaz (motor döner, açı değişmez, sistem pencere
+   korumasına çarpar).
+2. Sistem hareketsizken **Gyro Kalibre**.
+3. Cihazlar sekmesinde rolleri ve ölçüm eksenlerini kontrol edin.
+4. Anteni istediğiniz yere getirin → **Hedefi Kilitle**.
+5. Kayıt sekmesinden **Kaydı Başlat**.
+6. **OTOMATİK**'e basın. Eksen durumu panosunda her eksen için `takip` yazmalı.
+7. Düzeneği elinizle yavaşça eğin: motor ters yönde tepki vermeli, hata
+   sıfıra dönmeli.
+8. **Müdahale Testini Çalıştır** (varsayılan 15°). Sistem kendini kaydırır,
+   bırakır, süreyi ölçer. Sonuç: `son yeniden kilitlenme: 3.42 s -> GEÇTİ`.
+9. Performans kutusunda hata RMS ve en büyük hatayı izleyin; 5 dakika
+   kesintisiz çalıştırıp bu sayıları rapora alın.
+10. **Durdur** → **CSV İndir**.
+
+### İlk denemede beklenen sorun: ters yön
+
+Motorun artı yönü açının artı yönü değilse kontrolcü hatayı büyütür. Sistem
+bunu ayrı bir hata olarak yakalar (`ters yon`) ve ne yapılacağını log'a yazar:
+Cihazlar sekmesinde **Yönü Ters**, sonra hedefi tekrar kilitleyin. İkinci
+olasılık, o eksenin **ölçüm ekseninin** yanlış seçilmiş olması.
+
+### Hata / uyarı ayrımı
+
+- **Uyarı** (sarı şerit, sistem çalışmaya devam eder): geçici I2C hatası,
+  limite dayanma, gyro kalibre edilmemiş. 5 saniye sonra kendiliğinden düşer.
+- **Hata** (kırmızı, motorlar durur): IMU zaman aşımı, sapma sınırı, ters yön,
+  çalışma penceresi, sürücü kopması, acil durdurma.
+
+Hatadan çıkış: üst şeritteki **Hatayı Temizle**. Sistem manuel moda düşer —
+otomatiğe dönmeyi operatörün bilinçli olarak istemesi gerekir.
+
+### Jog hızı artık derece/saniye
+
+Arayüz adım/s değil **antende derece/s** konuşuyor; dişli oranını
+değiştirdiğinizde komutlarınız aynı kalır. Dönüşümü firmware yapar
+(`adım/s = derece/s × redüktör ÷ 0,9`).
 
 ## Toplanacak ölçümler
 
