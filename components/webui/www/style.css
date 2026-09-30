@@ -133,3 +133,6 @@ button.aktif-mod {
   color: var(--vurgu);
   font-weight: 700;
 }
+
+/* Hatta var ama kullanmadigimiz cihaz: gorunsun ama one cikmasin. */
+td.sonuk, td.sonuk-satir { color: var(--sonuk); }

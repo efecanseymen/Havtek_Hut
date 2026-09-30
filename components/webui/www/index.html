@@ -37,6 +37,9 @@
 <section id="s-cihaz" class="sekme aktif">
   <h2>Bulunan cihazlar</h2>
   <p class="ipucu">
+    Tablodaki her satir I2C hattinda <b>gercekten cevap veren</b> bir cihaz.
+    Beklediginiz bir satir yoksa sorun kablodadir; beklemediginiz bir adres
+    varsa ne oldugunu bilmek teshisin yarisidir.
     Surucu kartini kod tanimaz, yalnizca <b>hangi hatta hangi adreste</b>
     oldugunu gorur. Hangi motorun bagli oldugunu siz secersiniz &mdash; ya da
     IMU takiliysa "Eksen Tani" birkac adim atip hangi acinin degistigine bakar.
@@ -44,11 +47,14 @@
     takin; lehim gerekmez.
   </p>
   <table id="cihaz-tablo">
-    <thead><tr><th>Hat / Adres</th><th>Tip</th><th>Rol</th><th>Yon</th><th></th></tr></thead>
+    <thead><tr>
+      <th>Hat</th><th>Adres</th><th>Cihaz</th><th>Gorev</th>
+      <th>Rol</th><th>Yon</th><th></th>
+    </tr></thead>
     <tbody></tbody>
   </table>
   <button id="tara">Hatti Tara</button>
-  <div id="i2c-liste" class="ipucu"></div>
+  <div id="i2c-ozet" class="ipucu"></div>
 </section>
 
 <!-- --------------------------------------------------------------- motor -->

@@ -46,6 +46,14 @@ static const char *TAG = "rt";
 static eksen_t  s_eksen[HUT_MAKS_SURUCU];
 static uint8_t  s_eksen_sayi;
 
+/* Son taramada hattaki her adres. Motor olmayanlar da burada: arayuzde
+   IMU ve manyetometre de motor suruculeriyle ayni tabloda gorunuyor. */
+static struct {
+    uint8_t hat;
+    uint8_t adres;
+} s_bulunan[HUT_MAKS_CIHAZ];
+static uint8_t s_bulunan_sayi;
+
 static ahrs_t     s_ahrs;
 static imu_orneklem_t s_imu;
 static int64_t    s_imu_son_us;
@@ -206,6 +214,13 @@ static void hat_kesfet(int hat)
     }
     i2c_hub_tara(hat, &tarama);
 
+    /* Taramanin TAMAMINI kaydet: arayuz hepsini listeleyecek. */
+    for (int t = 0; t < tarama.sayi && s_bulunan_sayi < HUT_MAKS_CIHAZ; t++) {
+        s_bulunan[s_bulunan_sayi].hat   = (uint8_t)hat;
+        s_bulunan[s_bulunan_sayi].adres = tarama.adres[t];
+        s_bulunan_sayi++;
+    }
+
     /* 0x16 (varsayilan) her zaman ilk eklenir.
        ADR2 lehimlendi: ikinci surucu 0x18'de. */
     static const uint8_t aday[] = {
@@ -244,7 +259,8 @@ static void suruculeri_kesfet(void)
     for (int i = 0; i < s_eksen_sayi; i++) {
         eksen_bitir(&s_eksen[i]);
     }
-    s_eksen_sayi = 0;
+    s_eksen_sayi   = 0;
+    s_bulunan_sayi = 0;
 
     for (int hat = 0; hat < I2C_HUB_MAKS_HAT; hat++) {
         hat_kesfet(hat);
@@ -1147,6 +1163,52 @@ static void durum_yayinla(int64_t simdi, uint32_t dongu_us)
     d.mag_adres = bilgi->mag_adres;
     snprintf(d.mag_tip, sizeof(d.mag_tip), "%s",
              bilgi->mag_var ? bilgi->mag_tip : "yok");
+
+    /*
+     * Cihaz envanteri: hattaki her adres, ne oldugu ve ne ise yaradigi.
+     * Tanima adrese bakarak yapiliyor; IMU/manyetometre icin gercekten
+     * okunup okunmadigini imu_bilgi() soyluyor.
+     */
+    d.cihaz_sayisi = 0;
+    for (int c = 0; c < s_bulunan_sayi && d.cihaz_sayisi < HUT_MAKS_CIHAZ; c++) {
+        cihaz_kaydi_t *kayit = &d.cihaz[d.cihaz_sayisi++];
+        uint8_t adres = s_bulunan[c].adres;
+        uint8_t hat   = s_bulunan[c].hat;
+
+        memset(kayit, 0, sizeof(*kayit));
+        kayit->hat   = hat;
+        kayit->adres = adres;
+        kayit->eksen = -1;
+
+        if (adres >= ADR_MOTOR_ILK && adres <= ADR_MOTOR_SON) {
+            snprintf(kayit->tip, sizeof(kayit->tip), "M20 surucu");
+            kayit->motor = true;
+
+            for (int i = 0; i < s_eksen_sayi; i++) {
+                if (s_eksen[i].adres == adres && s_eksen[i].hat == hat) {
+                    kayit->eksen = (int8_t)i;
+                    snprintf(kayit->gorev, sizeof(kayit->gorev), "%s eksen",
+                             rol_adi(s_eksen[i].rol));
+                    break;
+                }
+            }
+            if (kayit->eksen < 0) {
+                snprintf(kayit->gorev, sizeof(kayit->gorev), "acilamadi");
+            }
+        } else if (adres == bilgi->adres && bilgi->var) {
+            snprintf(kayit->tip, sizeof(kayit->tip), "%s", bilgi->tip);
+            snprintf(kayit->gorev, sizeof(kayit->gorev), "aci + gyro");
+        } else if (bilgi->mag_var && adres == bilgi->mag_adres) {
+            snprintf(kayit->tip, sizeof(kayit->tip), "%s", bilgi->mag_tip);
+            snprintf(kayit->gorev, sizeof(kayit->gorev), "manyetometre");
+        } else if (adres == ADR_IMU_A || adres == ADR_IMU_B) {
+            snprintf(kayit->tip, sizeof(kayit->tip), "LSM6DS?");
+            snprintf(kayit->gorev, sizeof(kayit->gorev), "kullanilmiyor");
+        } else {
+            snprintf(kayit->tip, sizeof(kayit->tip), "bilinmiyor");
+            snprintf(kayit->gorev, sizeof(kayit->gorev), "kullanilmiyor");
+        }
+    }
 
     d.surucu_sayisi = s_eksen_sayi;
     for (int i = 0; i < s_eksen_sayi; i++) {

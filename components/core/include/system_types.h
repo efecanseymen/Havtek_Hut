@@ -126,6 +126,24 @@ typedef struct {
     char         anahtar[20];   /* KOMUT_PARAM icin                        */
 } komut_t;
 
+/* --------------------------------------------------------- cihaz envanteri */
+
+#define HUT_MAKS_CIHAZ  16
+
+/*
+ * I2C hattinda BULUNAN her cihaz. Kullandigimiz ve kullanmadigimiz ayrimi
+ * yapmiyoruz: arayuzde hepsi ayni tabloda gorunuyor. Beklenmedik bir adres
+ * cikmasi ya da beklenen bir adresin dusmesi teshisin yarisi.
+ */
+typedef struct {
+    uint8_t hat;
+    uint8_t adres;
+    char    tip[16];      /* "M20 surucu", "LSM6DSM", "MMC5603", "bilinmiyor" */
+    char    gorev[20];    /* "yatay eksen", "aci+gyro", "kullanilmiyor"       */
+    bool    motor;        /* rol/yon secicileri yalnizca motorlarda anlamli   */
+    int8_t  eksen;        /* eksen dizisindeki sira; motor degilse -1         */
+} cihaz_kaydi_t;
+
 /* ------------------------------------------------------------------ durum */
 
 typedef struct {
@@ -166,6 +184,9 @@ typedef struct {
 
     eksen_durum_t  eksen[HUT_MAKS_SURUCU];
     uint8_t        surucu_sayisi;
+
+    cihaz_kaydi_t  cihaz[HUT_MAKS_CIHAZ];
+    uint8_t        cihaz_sayisi;
 
     bool           imu_var;
     uint8_t        imu_adres;

@@ -453,7 +453,7 @@ static const char *hata_adi(hata_kodu_t h)
 
 static void telemetri_gonder(void)
 {
-    static char tampon[2400];
+    static char tampon[3200];
     sistem_durum_t d;
     int n = 0;
 
@@ -472,6 +472,17 @@ static void telemetri_gonder(void)
         d.durus.kalibre ? 1 : 0,
         d.imu.gyro[0], d.imu.gyro[1], d.imu.gyro[2],
         d.imu.ivme[0], d.imu.ivme[1], d.imu.ivme[2]);
+
+    /* Cihaz envanteri: hattaki her sey, motor olsun olmasin. */
+    n += snprintf(tampon + n, sizeof(tampon) - n, "\"cihaz\":[");
+    for (int c = 0; c < d.cihaz_sayisi && n < (int)sizeof(tampon) - 260; c++) {
+        n += snprintf(tampon + n, sizeof(tampon) - n,
+            "%s{\"hat\":%d,\"adres\":%d,\"tip\":\"%s\",\"gorev\":\"%s\","
+            "\"motor\":%d,\"eksen\":%d}",
+            c ? "," : "", d.cihaz[c].hat, d.cihaz[c].adres, d.cihaz[c].tip,
+            d.cihaz[c].gorev, d.cihaz[c].motor ? 1 : 0, d.cihaz[c].eksen);
+    }
+    n += snprintf(tampon + n, sizeof(tampon) - n, "],");
 
     n += snprintf(tampon + n, sizeof(tampon) - n, "\"eksen\":[");
     for (int i = 0; i < d.surucu_sayisi && n < (int)sizeof(tampon) - 200; i++) {

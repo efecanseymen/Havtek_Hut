@@ -60,29 +60,56 @@ function ciz(d) {
   h.textContent = 'hata: ' + d.hata;
   h.className = 'rozet ' + (d.hata === 'yok' ? 'iyi' : 'kotu');
 
-  /* cihaz tablosu */
+  /* --- cihaz tablosu: hattaki HER cihaz, motor olsun olmasin --- */
   const govde = $('#cihaz-tablo tbody');
   govde.innerHTML = '';
-  (d.eksen || []).forEach((e) => {
+
+  const eksenler = d.eksen || [];
+  (d.cihaz || []).forEach((c) => {
+    const eks = c.eksen >= 0 ? eksenler.find((e) => e.i === c.eksen) : null;
+    const adres = '0x' + c.adres.toString(16).toUpperCase();
+
+    let rolHucre = '<td class="sonuk">-</td>';
+    let yonHucre = '<td class="sonuk">-</td>';
+    let islem    = '<td></td>';
+
+    if (c.motor && eks) {
+      rolHucre =
+        '<td><select data-i="' + eks.i + '" class="rol-sec">' +
+          '<option value="0"' + (eks.rol === 0 ? ' selected' : '') + '>yatay (azimut)</option>' +
+          '<option value="1"' + (eks.rol === 1 ? ' selected' : '') + '>dikey (elevasyon)</option>' +
+        '</select></td>';
+      yonHucre = '<td>' + (eks.yon > 0 ? '+' : '&minus;') + '</td>';
+      islem =
+        '<td><button class="tani" data-i="' + eks.i + '">Eksen Tani</button> ' +
+            '<button class="ters" data-rol="' + eks.rol + '">Yonu Ters</button></td>';
+    }
+
+    /* Kullanilmayan cihazi soluk goster: gozle ayirt edilebilsin. */
+    const solgun = (c.gorev === 'kullanilmiyor') ? ' class="sonuk-satir"' : '';
+
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td>hat ' + e.hat + ' / 0x' + e.adres.toString(16).toUpperCase() + '</td>' +
-      '<td>M20 surucu</td>' +
-      '<td><select data-i="' + e.i + '" class="rol-sec">' +
-        '<option value="0"' + (e.rol === 0 ? ' selected' : '') + '>yatay (azimut)</option>' +
-        '<option value="1"' + (e.rol === 1 ? ' selected' : '') + '>dikey (elevasyon)</option>' +
-      '</select></td>' +
-      '<td>' + (e.yon > 0 ? '+' : '-') + '</td>' +
-      '<td><button class="tani" data-i="' + e.i + '">Eksen Tani</button> ' +
-          '<button class="ters" data-rol="' + e.rol + '">Yonu Ters</button></td>';
+      '<td>' + c.hat + '</td>' +
+      '<td>' + adres + '</td>' +
+      '<td>' + c.tip + '</td>' +
+      '<td' + solgun + '>' + c.gorev + '</td>' +
+      rolHucre + yonHucre + islem;
     govde.appendChild(tr);
   });
-  if (d.imu && d.imu.var) {
-    $('#i2c-liste').textContent =
-      'IMU: 0x' + d.imu.adres.toString(16) + '  manyetometre: ' + (d.imu.mag || 'yok');
-  } else {
-    $('#i2c-liste').textContent = 'IMU bulunamadi.';
+
+  if (!(d.cihaz || []).length) {
+    govde.innerHTML = '<tr><td colspan="7">Hatta hic cihaz bulunamadi. ' +
+      'Kablo, besleme ve ortak GND kontrol edin.</td></tr>';
   }
+
+  /* Ozet: kac cihaz, hangi hatta; IMU okunuyor mu. */
+  const say = (h) => (d.cihaz || []).filter((c) => c.hat === h).length;
+  const im = d.imu || {};
+  $('#i2c-ozet').textContent =
+    'hat 0: ' + say(0) + ' cihaz   hat 1: ' + say(1) + ' cihaz   |   ' +
+    (im.var ? 'IMU okunuyor' : 'IMU YOK') +
+    (im.mag && im.mag !== 'yok' ? ', manyetometre okunuyor' : ', manyetometre yok');
 
   /* motor */
   $('#m-durum').textContent = (d.eksen || []).map((e) =>
