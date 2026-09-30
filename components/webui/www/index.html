@@ -14,6 +14,7 @@
     <span id="baglanti" class="rozet kotu">bagli degil</span>
     <span id="mod" class="rozet">-</span>
     <span id="hata" class="rozet">-</span>
+    <button id="hata-sil">Hatayi Temizle</button>
     <button id="estop" class="acil">ACIL DUR</button>
   </div>
 </header>
@@ -66,7 +67,18 @@
     <button id="m-ref">Referansi Ayarla</button>
     <button id="m-serbest">Bobinleri Birak</button>
   </div>
+  <div class="satir">
+    <span class="ipucu" style="align-self:center">Limit ogret (secili eksen):</span>
+    <button id="lim-alt">Burasi ALT limit</button>
+    <button id="lim-ust">Burasi UST limit</button>
+    <label>Limitler acik <input data-param="limit_aktif" type="checkbox"></label>
+  </div>
   <div id="m-durum" class="olcum"></div>
+  <p class="ipucu">
+    Limiti cetvelle olcmek yerine ekseni elle sinira getirip dugmeye basin.
+    Azimut limiti simetriktir (+-), o yuzden iki dugme de ayni isi yapar.
+    Limitleri ancak <b>referansi ayarladiktan sonra</b> ogretin.
+  </p>
 </section>
 
 <!-- -------------------------------------------------------------- sensor -->
@@ -101,6 +113,11 @@
     <label>Kontrolcu
       <select id="st-fuzzy"><option value="1">Fuzzy-PI</option>
                             <option value="0">sabit PI</option></select>
+    </label>
+    <label>Olcum acisi
+      <select id="st-olcum"><option value="1">pitch</option>
+                            <option value="0">roll</option>
+                            <option value="2">yaw</option></select>
     </label>
   </div>
   <div class="satir">

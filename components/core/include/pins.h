@@ -36,9 +36,9 @@
 
 /* ----------------------------------------------------------- I2C adresleri */
 
-/* M20 motor surucu. Fabrika cikisi 0x16; ADR1 lehim koprusu 0x17 yapar. */
+/* M20 motor surucu. Fabrika cikisi 0x16; lehim koprusuyle 0x17 veya 0x18. */
 #define ADR_MOTOR_ILK      0x16
-#define ADR_MOTOR_SON      0x19
+#define ADR_MOTOR_SON      0x18
 
 /* LSM6DSM / LSM6DSL ivme+gyro. SDO pinine gore 0x6A veya 0x6B. */
 #define ADR_IMU_A          0x6A

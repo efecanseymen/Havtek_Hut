@@ -206,12 +206,24 @@ bool eksen_servis(eksen_t *e, int64_t simdi_us, float dt_s)
         e->anlik_sps += (fark > 0.0f) ? adim_degisim : -adim_degisim;
     }
 
-    /* Duran motordan kalkis: sifirdan rampalamak yerine "cekme hizi"ndan
-       basla, yoksa ilk adimin periyodu saniyeler surer. */
-    if (fabsf(e->anlik_sps) < g_cfg.baslangic_sps && fabsf(hedef) > 0.01f) {
-        e->anlik_sps = (hedef > 0.0f) ? g_cfg.baslangic_sps
-                                      : -g_cfg.baslangic_sps;
-        e->sonraki_us = simdi_us;   /* ilk adimi bekletme */
+    /*
+     * Duran motordan kalkis: sifirdan rampalamak yerine "cekme hizi"ndan
+     * basla, yoksa ilk adimin periyodu saniyeler surer.
+     *
+     * DIKKAT: bu zemin ISTENEN hizi asmamali. Onceki surum kosulsuz
+     * baslangic_sps'e yukseltiyordu ve sonucu su oluyordu: 60'in altindaki
+     * hicbir hiz komutu calismiyor, "10 adim/s" isteyince motor 60'ta
+     * doniyordu. Yavas hassas hareket (limit ogretme, ince hizalama) bu
+     * yuzden imkansizdi.
+     */
+    if (fabsf(e->anlik_sps) < 0.5f && fabsf(hedef) > 0.01f) {
+        float kalkis = g_cfg.baslangic_sps;
+
+        if (kalkis > fabsf(hedef)) {
+            kalkis = fabsf(hedef);      /* istenen hizi asma */
+        }
+        e->anlik_sps  = (hedef > 0.0f) ? kalkis : -kalkis;
+        e->sonraki_us = simdi_us;       /* ilk adimi bekletme */
     }
 
     mutlak = fabsf(e->anlik_sps);

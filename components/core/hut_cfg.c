@@ -17,7 +17,7 @@
 static const char *TAG = "cfg";
 
 #define CFG_SIHIR   0x48555431u    /* "HUT1" */
-#define CFG_SURUM   2   /* v2: rol/yon haritasi (hat,adres) ikilisine gecti */
+#define CFG_SURUM   3   /* v3: olcum_ekseni eklendi */
 #define NVS_ALAN    "havtek"
 #define NVS_ANAHTAR "cfg"
 
@@ -71,6 +71,9 @@ void hut_cfg_varsayilan(hut_cfg_t *c)
     c->entegral_sinir  = VARS_ENTEGRAL_SINIR;
     c->stab_pencere    = VARS_STAB_PENCERE;
     c->stab_hata_sinir = VARS_STAB_HATA_SINIR;
+
+    c->olcum_ekseni[ROL_AZ] = OLCUM_YAW;
+    c->olcum_ekseni[ROL_EL] = OLCUM_PITCH;
 
     c->q_aci   = VARS_Q_ACI;
     c->q_bias  = VARS_Q_BIAS;
@@ -217,6 +220,16 @@ bool hut_cfg_param_ayarla(hut_cfg_t *c, const char *anahtar, float deger)
         hut_cfg_kirlet();
         return true;
     }
+    if (strcmp(anahtar, "olcum_az") == 0) {
+        c->olcum_ekseni[ROL_AZ] = (uint8_t)deger;
+        hut_cfg_kirlet();
+        return true;
+    }
+    if (strcmp(anahtar, "olcum_el") == 0) {
+        c->olcum_ekseni[ROL_EL] = (uint8_t)deger;
+        hut_cfg_kirlet();
+        return true;
+    }
     if (strcmp(anahtar, "tutma_torku") == 0) {
         c->tutma_torku = (deger != 0.0f);
         hut_cfg_kirlet();
@@ -236,7 +249,8 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         "\"q_aci\":%.4f,\"q_bias\":%.4f,\"r_olcum\":%.4f,"
         "\"az_limit\":%.1f,\"el_min\":%.1f,\"el_maks\":%.1f,\"limit_aktif\":%d,"
         "\"reduktor_az\":%.3f,\"reduktor_el\":%.3f,\"tutma_torku\":%d,"
-        "\"kuzey_ofset\":%.1f,\"gyro_kalibre\":%d,\"mag_kalibre\":%d}",
+        "\"kuzey_ofset\":%.1f,\"gyro_kalibre\":%d,\"mag_kalibre\":%d,"
+        "\"olcum_az\":%d,\"olcum_el\":%d}",
         HUT_SURUM, c->maks_sps, c->ivme, c->jog_sps, c->baslangic_sps,
         c->fuzzy ? 1 : 0, c->kp_min, c->kp_maks, c->ki,
         c->hata_olcek, c->olu_bant, c->entegral_sinir,
@@ -244,5 +258,6 @@ int hut_cfg_json(const hut_cfg_t *c, char *cikis, int boyut)
         c->q_aci, c->q_bias, c->r_olcum,
         c->az_limit, c->el_min, c->el_maks, c->limit_aktif ? 1 : 0,
         c->reduktor[ROL_AZ], c->reduktor[ROL_EL], c->tutma_torku ? 1 : 0,
-        c->kuzey_ofset, c->gyro_kalibre ? 1 : 0, c->mag_kalibre ? 1 : 0);
+        c->kuzey_ofset, c->gyro_kalibre ? 1 : 0, c->mag_kalibre ? 1 : 0,
+        c->olcum_ekseni[ROL_AZ], c->olcum_ekseni[ROL_EL]);
 }

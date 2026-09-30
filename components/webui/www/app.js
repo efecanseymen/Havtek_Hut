@@ -169,7 +169,15 @@ document.querySelectorAll('#sekmeler button').forEach((b) => {
   };
 });
 
-$('#estop').onclick = () => gonder({ c: 'estop' });
+$('#estop').onclick    = () => gonder({ c: 'estop' });
+$('#hata-sil').onclick = () => gonder({ c: 'hata_sil' });
+
+$('#lim-alt').onclick = () => gonder({ c: 'limit_ogret', rol: +$('#m-rol').value, ust: 0 });
+$('#lim-ust').onclick = () => gonder({ c: 'limit_ogret', rol: +$('#m-rol').value, ust: 1 });
+
+/* Olcum acisi: hangi eksen icin degistirildigini stab panelindeki rol belirler. */
+$('#st-olcum').onchange = (e) =>
+  gonder({ c: 'olcum', rol: +$('#st-rol').value, eksen: +e.target.value });
 $('#tara').onclick  = () => gonder({ c: 'tara' });
 
 /* jog: basili tutuldugu surece doner. Fare/parmak kalkinca durur -- bu

@@ -60,6 +60,13 @@ static float   s_stab_hedef;
 static float   s_stab_olculen, s_stab_hata, s_stab_sps;
 static int32_t s_stab_merkez_adim;
 
+/* Ters yon tespiti: eksen hareket ediyor ama hata duzelmiyorsa polarite
+   yanlis demektir. 200 ms'lik orneklerle (sapma, hata) degisimlerinin
+   isaretine bakiyoruz; ayni yonde degisiyorlarsa geri besleme POZITIF. */
+static int64_t s_ters_ornek_us;
+static float   s_ters_son_sapma, s_ters_son_hata;
+static int     s_ters_sayac;
+
 static bool s_log_acik;
 static uint32_t s_log_satir;
 static uint32_t s_asim;
@@ -75,11 +82,13 @@ static struct {
     bool     aktif;
     int      indeks;
     int64_t  baslangic_us;
-    float    pitch0, yaw0;
+    float    roll0, pitch0, yaw0;
     int32_t  adim0;
 } s_tani;
 
 /* --------------------------------------------------------- yardimcilar */
+
+static const char *olcum_adi(uint8_t e);
 
 static int eksen_bul_rol(int rol)
 {
@@ -154,8 +163,17 @@ static void hat_kesfet(int hat)
     }
     i2c_hub_tara(hat, &tarama);
 
-    for (uint8_t adres = ADR_MOTOR_ILK; adres <= ADR_MOTOR_SON; adres++) {
+    /* 0x16 (varsayilan) her zaman ilk eklenir.
+       ADR2 lehimlendi: ikinci surucu 0x18'de. */
+    static const uint8_t aday[] = {
+        M20_ADRES_VARSAYILAN,    /* 0x16 -- fabrika cikisi      */
+        M20_ADRES_ALT2,          /* 0x18 -- ADR2 lehim koprusu  */
+    };
+
+    for (int a = 0; a < (int)(sizeof(aday) / sizeof(aday[0])); a++) {
+        uint8_t adres = aday[a];
         bool bulundu = false;
+
         for (int i = 0; i < tarama.sayi; i++) {
             if (tarama.adres[i] == adres) {
                 bulundu = true;
@@ -190,11 +208,49 @@ static void suruculeri_kesfet(void)
     }
 
     if (s_eksen_sayi == 0) {
-        ESP_LOGW(TAG, "hicbir motor surucusu bulunamadi (0x16-0x19)");
+        ESP_LOGW(TAG, "hicbir motor surucusu bulunamadi (0x16, 0x17, 0x18)");
         ESP_LOGW(TAG, "iki surucu de 0x16 ise ayni hatta takilamaz: ya ikinci");
         ESP_LOGW(TAG, "hatti kullanin (SDA=%d SCL=%d) ya da lehim koprusuyle",
                  PIN_I2C2_SDA, PIN_I2C2_SCL);
-        ESP_LOGW(TAG, "birini 0x17 yapin.");
+        ESP_LOGW(TAG, "birini 0x17 veya 0x18 yapin.");
+    } else if (s_eksen_sayi == 1) {
+        ESP_LOGI(TAG, "tek surucu bulundu (0x%02X). Ikinci surucu icin lehim "
+                 "koprusuyle 0x17 veya 0x18 yapip ayni hatta takin veya ikinci "
+                 "hatti kullanin.", s_eksen[0].adres);
+    } else {
+        ESP_LOGI(TAG, "%d surucu bulundu:", s_eksen_sayi);
+        for (int i = 0; i < s_eksen_sayi; i++) {
+            ESP_LOGI(TAG, "  eksen %d: hat %d, adres 0x%02X, rol=%s",
+                     i, s_eksen[i].hat, s_eksen[i].adres,
+                     s_eksen[i].rol == ROL_AZ ? "yatay" : "dikey");
+        }
+
+        /* Ayni hatta iki farkli adresli surucu bulunduysa ve rolleri henuz
+           NVS'te atanmamissa, varsayilan atamayi yap: dusuk adres -> AZ,
+           yuksek adres -> EL. Kullanici sonradan arayuzden veya eksen tani
+           ile degistirebilir. */
+        if (s_eksen_sayi == 2 &&
+            s_eksen[0].hat == s_eksen[1].hat &&
+            s_eksen[0].adres != s_eksen[1].adres) {
+
+            int dusuk = (s_eksen[0].adres < s_eksen[1].adres) ? 0 : 1;
+            int yuksek = 1 - dusuk;
+            int slot_d = slot_no(s_eksen[dusuk].hat, s_eksen[dusuk].adres);
+            int slot_y = slot_no(s_eksen[yuksek].hat, s_eksen[yuksek].adres);
+
+            bool d_atanmis = (slot_d >= 0 && g_cfg.rol_atandi[slot_d]);
+            bool y_atanmis = (slot_y >= 0 && g_cfg.rol_atandi[slot_y]);
+
+            if (!d_atanmis && !y_atanmis) {
+                s_eksen[dusuk].rol  = ROL_AZ;
+                s_eksen[yuksek].rol = ROL_EL;
+                ESP_LOGI(TAG, "oto-atama: 0x%02X -> yatay (AZ), "
+                         "0x%02X -> dikey (EL)",
+                         s_eksen[dusuk].adres, s_eksen[yuksek].adres);
+                ESP_LOGI(TAG, "degistirmek icin 'eksen tani' veya 'rol ata' "
+                         "komutunu kullanin.");
+            }
+        }
     }
 }
 
@@ -218,6 +274,7 @@ static void tani_basla(int indeks)
     s_tani.aktif        = true;
     s_tani.indeks       = indeks;
     s_tani.baslangic_us = esp_timer_get_time();
+    s_tani.roll0        = s_ahrs.roll;
     s_tani.pitch0       = s_ahrs.pitch;
     s_tani.yaw0         = s_ahrs.yaw;
     s_tani.adim0        = s_eksen[indeks].adim;
@@ -239,6 +296,7 @@ static void tani_isle(int64_t simdi)
         return;
     }
 
+    float d_roll  = s_ahrs.roll  - s_tani.roll0;
     float d_pitch = s_ahrs.pitch - s_tani.pitch0;
     float d_yaw   = s_ahrs.yaw   - s_tani.yaw0;
     int32_t d_adim = e->adim - s_tani.adim0;
@@ -246,9 +304,10 @@ static void tani_isle(int64_t simdi)
     s_tani.aktif = false;
     eksen_git(e, s_tani.adim0);     /* baslangica don */
 
-    if (fabsf(d_pitch) < 1.0f && fabsf(d_yaw) < 1.0f) {
-        ESP_LOGW(TAG, "eksen tani: aci degismedi (d_pitch=%.2f d_yaw=%.2f, "
-                 "%ld adim atildi)", d_pitch, d_yaw, (long)d_adim);
+    if (fabsf(d_roll) < 1.0f && fabsf(d_pitch) < 1.0f && fabsf(d_yaw) < 1.0f) {
+        ESP_LOGW(TAG, "eksen tani: aci degismedi (d_roll=%.2f d_pitch=%.2f "
+                 "d_yaw=%.2f, %ld adim atildi)", d_roll, d_pitch, d_yaw,
+                 (long)d_adim);
         ESP_LOGW(TAG, "IMU hareket eden eksene MONTELI degilse bu test calismaz;");
         ESP_LOGW(TAG, "tezgahta IMU masada duruyorsa rolu elle secin. Diger");
         ESP_LOGW(TAG, "ihtimaller: motor bagli degil, adim kaciriyor, mekanik tutmus.");
@@ -257,14 +316,31 @@ static void tani_isle(int64_t simdi)
 
     int slot = slot_no(e->hat, e->adres);
     float degisim;
+    uint8_t olcum;
 
-    if (fabsf(d_pitch) >= fabsf(d_yaw)) {
-        e->rol = ROL_EL;
+    /*
+     * En cok degisen aci bu ekseni temsil ediyor. Roll de adaylar arasinda:
+     * IMU'nun montaj yonune gore elevasyon hareketi pitch yerine roll'de
+     * gorunebiliyor ve bunu varsaymak yerine olcmek gerekiyor.
+     *
+     * Yaw ayrica kaydigi icin kucuk bir esikle one gecmesin diye en son
+     * degerlendiriliyor.
+     */
+    if (fabsf(d_roll) >= fabsf(d_pitch) && fabsf(d_roll) >= fabsf(d_yaw)) {
+        olcum   = OLCUM_ROLL;
+        degisim = d_roll;
+        e->rol  = ROL_EL;      /* roll/pitch = egim -> dikey eksen */
+    } else if (fabsf(d_pitch) >= fabsf(d_yaw)) {
+        olcum   = OLCUM_PITCH;
         degisim = d_pitch;
+        e->rol  = ROL_EL;
     } else {
-        e->rol = ROL_AZ;
+        olcum   = OLCUM_YAW;
         degisim = d_yaw;
+        e->rol  = ROL_AZ;
     }
+
+    g_cfg.olcum_ekseni[e->rol] = olcum;
 
     /* Aci, komut edilen yonde mi degisti? Degilse motor yonu ters. */
     bool ters = (degisim > 0.0f) != (d_adim > 0);
@@ -277,9 +353,11 @@ static void tani_isle(int64_t simdi)
         hut_cfg_kirlet();
     }
 
-    ESP_LOGI(TAG, "eksen tani: hat %d 0x%02X -> %s, yon %d (pitch %.1f, yaw %.1f)",
-             e->hat, e->adres, e->rol == ROL_AZ ? "yatay" : "dikey", e->yon,
-             d_pitch, d_yaw);
+    ESP_LOGI(TAG, "eksen tani: hat %d 0x%02X -> %s eksen, olcum=%s, yon=%d",
+             e->hat, e->adres, e->rol == ROL_AZ ? "yatay" : "dikey",
+             olcum_adi(olcum), e->yon);
+    ESP_LOGI(TAG, "  olculen degisim: roll %.1f  pitch %.1f  yaw %.1f  (%ld adim)",
+             d_roll, d_pitch, d_yaw, (long)d_adim);
 }
 
 /* ------------------------------------------------------ mag kalibrasyonu */
@@ -326,9 +404,34 @@ static void mag_kal_bitir(void)
 
 /* ---------------------------------------------------------- stabilizasyon */
 
+/* Hangi IMU acisi bu ekseni temsil ediyor? Mekanik montaja bagli, o yuzden
+   ayardan okunuyor ("Eksen Tani" bunu olcup yaziyor). */
 static float stab_olcum(void)
 {
-    return (s_stab_rol == ROL_EL) ? s_ahrs.pitch : s_ahrs.yaw;
+    uint8_t eksen = g_cfg.olcum_ekseni[s_stab_rol < ROL_SAYISI ? s_stab_rol : 0];
+
+    switch (eksen) {
+    case OLCUM_ROLL:  return s_ahrs.roll;
+    case OLCUM_YAW:   return s_ahrs.yaw;
+    case OLCUM_PITCH:
+    default:          return s_ahrs.pitch;
+    }
+}
+
+static const char *olcum_adi(uint8_t e)
+{
+    switch (e) {
+    case OLCUM_ROLL: return "roll";
+    case OLCUM_YAW:  return "yaw";
+    default:         return "pitch";
+    }
+}
+
+/* Olculen aci 360 derecede doniyor mu? Yalnizca yaw icin evet. */
+static bool olcum_sarmali(void)
+{
+    return g_cfg.olcum_ekseni[s_stab_rol < ROL_SAYISI ? s_stab_rol : 0]
+           == OLCUM_YAW;
 }
 
 static void stab_kilitle(void)
@@ -337,7 +440,14 @@ static void stab_kilitle(void)
     int i = eksen_bul_rol(s_stab_rol);
     s_stab_merkez_adim = (i >= 0) ? s_eksen[i].adim : 0;
     kontrol_sifirla(&s_kontrol);
-    ESP_LOGI(TAG, "hedef kilitlendi: %.2f derece", s_stab_hedef);
+
+    s_ters_ornek_us  = esp_timer_get_time();
+    s_ters_son_sapma = 0.0f;
+    s_ters_son_hata  = 0.0f;
+    s_ters_sayac     = 0;
+
+    ESP_LOGI(TAG, "hedef kilitlendi: %.2f derece (%s)", s_stab_hedef,
+             olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]));
 }
 
 static void stab_ac(bool ac, int rol)
@@ -381,11 +491,18 @@ static void stab_ac(bool ac, int rol)
     stab_kilitle();
     s_stab_acik = true;
     s_mod = MOD_STAB;
-    ESP_LOGI(TAG, "stabilizasyon acik (%s)",
-             s_stab_rol == ROL_AZ ? "yatay/yaw" : "dikey/pitch");
+
+    /* Acilis ozeti: sonradan "hangi ayarla calisiyordu" sorusuna cevap. */
+    ESP_LOGI(TAG, "STABILIZASYON ACIK -- eksen=%s olcum=%s reduktor=%.2f",
+             s_stab_rol == ROL_AZ ? "yatay" : "dikey",
+             olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]),
+             rol_reduktor(s_stab_rol));
+    ESP_LOGI(TAG, "  pencere=%.0f derece  sapma siniri=%.0f derece  "
+             "maks hiz=%.0f adim/s", g_cfg.stab_pencere,
+             g_cfg.stab_hata_sinir, g_cfg.maks_sps);
 }
 
-static void stab_calistir(float dt)
+static void stab_calistir(float dt, int64_t simdi_us)
 {
     int i = eksen_bul_rol(s_stab_rol);
     if (i < 0) {
@@ -398,8 +515,8 @@ static void stab_calistir(float dt)
     s_stab_olculen = stab_olcum();
     s_stab_hata    = s_stab_hedef - s_stab_olculen;
 
-    /* Yaw'da -180/+180 gecisini kisa yoldan gec. */
-    if (s_stab_rol == ROL_AZ) {
+    /* Yaw'da -180/+180 gecisini kisa yoldan gec. Roll/pitch sarmaz. */
+    if (olcum_sarmali()) {
         if (s_stab_hata >  180.0f) s_stab_hata -= 360.0f;
         if (s_stab_hata < -180.0f) s_stab_hata += 360.0f;
     }
@@ -412,14 +529,54 @@ static void stab_calistir(float dt)
         return;
     }
 
-    /* Guvenlik 2: calisma penceresi. Eksen referanstan fazla uzaklasmasin. */
     float reduktor = rol_reduktor(s_stab_rol);
     float merkez_der = (float)s_stab_merkez_adim *
                        (EKSEN_MOTOR_DERECE_ADIM / reduktor);
     float sapma = eksen_derece(e, reduktor) - merkez_der;
 
+    /*
+     * Guvenlik 2: TERS YON tespiti.
+     *
+     * Kontrolcu hatayi kapatmak icin ekseni cevirir. Polarite dogruysa eksen
+     * ilerledikce hata kuculuyor olmali. Ikisi AYNI yonde degisiyorsa geri
+     * besleme pozitiftir: motor hatayi buyuterek kacar ve saniyeler icinde
+     * pencereye carpar. Bunu "limit hatasi" diye bildirmek kullaniciyi yanlis
+     * yere bakmaya iter; o yuzden once burada yakaliyoruz.
+     *
+     * 200 ms'lik orneklerle bakiyoruz ve ust uste 3 ornek istiyoruz: elle
+     * platformu egmek de hatayi buyutur ama eksen hareketiyle ayni yonde
+     * tutarli bir iliski uretmez.
+     */
+    if (simdi_us - s_ters_ornek_us >= 200000) {
+        float d_sapma = sapma - s_ters_son_sapma;
+        float d_hata  = fabsf(s_stab_hata) - fabsf(s_ters_son_hata);
+
+        if (fabsf(d_sapma) > 0.5f && d_hata > 0.1f && fabsf(s_stab_hata) > 2.0f) {
+            s_ters_sayac++;
+        } else {
+            s_ters_sayac = 0;
+        }
+
+        s_ters_son_sapma = sapma;
+        s_ters_son_hata  = s_stab_hata;
+        s_ters_ornek_us  = simdi_us;
+
+        if (s_ters_sayac >= 3) {
+            ESP_LOGE(TAG, "TERS YON: eksen %.1f derece dondu ama hata "
+                     "%.1f dereceye BUYUDU", sapma, s_stab_hata);
+            ESP_LOGE(TAG, "Yapilacak: Cihazlar sekmesinde bu eksen icin");
+            ESP_LOGE(TAG, "'Yonu Ters' deyin, sonra hedefi tekrar kilitleyin.");
+            ESP_LOGE(TAG, "Ikinci ihtimal: olcum ekseni yanlis (%s secili).",
+                     olcum_adi(g_cfg.olcum_ekseni[s_stab_rol]));
+            hataya_dus(HATA_TERS_YON);
+            return;
+        }
+    }
+
+    /* Guvenlik 3: calisma penceresi. Eksen referanstan fazla uzaklasmasin. */
     if (fabsf(sapma) > g_cfg.stab_pencere) {
-        ESP_LOGE(TAG, "calisma penceresi disina cikildi (%.1f derece)", sapma);
+        ESP_LOGE(TAG, "calisma penceresi disina cikildi (%.1f derece, sinir %.0f)",
+                 sapma, g_cfg.stab_pencere);
         hataya_dus(HATA_LIMIT);
         return;
     }
@@ -586,6 +743,53 @@ static void komut_uygula(const komut_t *k)
         stab_kilitle();
         break;
 
+    case KOMUT_LIMIT_OGRET: {
+        /*
+         * "Anten su an neredeyse, burasi limit olsun."
+         *
+         * Limiti sayiyla girmek icin mekanigi cetvelle olcmek gerekir; bunun
+         * yerine ekseni elle sinira getirip bu dugmeye basmak hem daha hizli
+         * hem daha dogru. Takim tezgahlarinda limit ogretme bu sekilde yapilir.
+         */
+        i = eksen_bul_rol(k->a);
+        if (i < 0) {
+            s_hata = HATA_SURUCU_YOK;
+            break;
+        }
+        float aci = eksen_derece(&s_eksen[i], rol_reduktor(k->a));
+
+        if (k->a == ROL_AZ) {
+            /* AZ limiti simetrik (+-): mutlak deger alinir. */
+            g_cfg.az_limit = fabsf(aci);
+            ESP_LOGI(TAG, "AZ limiti ogretildi: +-%.2f derece", g_cfg.az_limit);
+        } else if (k->b == 0) {
+            g_cfg.el_min = aci;
+            ESP_LOGI(TAG, "EL alt limiti ogretildi: %.2f derece", aci);
+        } else {
+            g_cfg.el_maks = aci;
+            ESP_LOGI(TAG, "EL ust limiti ogretildi: %.2f derece", aci);
+        }
+
+        /* Alt ust karismissa duzelt -- yon ters bagliysa bu olur. */
+        if (g_cfg.el_min > g_cfg.el_maks) {
+            float t = g_cfg.el_min;
+            g_cfg.el_min = g_cfg.el_maks;
+            g_cfg.el_maks = t;
+            ESP_LOGW(TAG, "EL alt/ust ters girilmis, yer degistirildi");
+        }
+        hut_cfg_kirlet();
+        break;
+    }
+
+    case KOMUT_OLCUM_EKSENI:
+        if (k->a >= 0 && k->a < ROL_SAYISI && k->b >= 0 && k->b <= OLCUM_YAW) {
+            g_cfg.olcum_ekseni[k->a] = (uint8_t)k->b;
+            hut_cfg_kirlet();
+            ESP_LOGI(TAG, "%s eksen artik %s acisini takip edecek",
+                     k->a == ROL_AZ ? "yatay" : "dikey", olcum_adi(k->b));
+        }
+        break;
+
     case KOMUT_PARAM:
         if (!hut_cfg_param_ayarla(&g_cfg, k->anahtar, k->c)) {
             ESP_LOGW(TAG, "bilinmeyen parametre: %s", k->anahtar);
@@ -718,7 +922,7 @@ static void kontrol_dilimi(int64_t simdi, float dt)
 
     /* --- stabilizasyon --- */
     if (s_stab_acik && s_mod == MOD_STAB) {
-        stab_calistir(dt);
+        stab_calistir(dt, simdi);
     }
 
     /* --- GIT bitti mi --- */

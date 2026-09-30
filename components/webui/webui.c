@@ -282,6 +282,14 @@ static bool komut_ayristir(const char *j, komut_t *k)
         k->b   = rol_coz(j, "rol");
     } else if (strcmp(komut, "kilit") == 0) {
         k->tip = KOMUT_STAB_KILIT;
+    } else if (strcmp(komut, "limit_ogret") == 0) {
+        k->tip = KOMUT_LIMIT_OGRET;
+        k->a   = rol_coz(j, "rol");
+        k->b   = (int32_t)sayi(j, "ust", 0);
+    } else if (strcmp(komut, "olcum") == 0) {
+        k->tip = KOMUT_OLCUM_EKSENI;
+        k->a   = rol_coz(j, "rol");
+        k->b   = (int32_t)sayi(j, "eksen", 1);
     } else if (strcmp(komut, "yon_ters") == 0) {
         k->tip = KOMUT_YON_TERS;
         k->a   = rol_coz(j, "rol");
@@ -426,6 +434,7 @@ static const char *hata_adi(hata_kodu_t h)
     case HATA_SAPMA:            return "sapma siniri";
     case HATA_SURUCU_YOK:       return "surucu yok";
     case HATA_ACIL_DURDURMA:    return "acil durdurma";
+    case HATA_TERS_YON:         return "ters yon";
     }
     return "?";
 }
@@ -467,10 +476,14 @@ static void telemetri_gonder(void)
     n += snprintf(tampon + n, sizeof(tampon) - n,
         "\"stab\":{\"on\":%d,\"rol\":%d,\"hedef\":%.2f,\"olculen\":%.2f,"
         "\"e\":%.2f,\"kp\":%.2f,\"sps\":%.1f},"
+        "\"lim\":{\"aktif\":%d,\"az\":%.2f,\"el_min\":%.2f,\"el_maks\":%.2f,"
+        "\"olcum_az\":%d,\"olcum_el\":%d},"
         "\"sis\":{\"dongu\":%lu,\"asim\":%lu,\"log\":%d,\"satir\":%lu,"
         "\"dusen\":%lu,\"istemci\":%d}}",
         d.stab_acik ? 1 : 0, d.stab_rol, d.stab_hedef, d.stab_olculen,
         d.stab_hata, d.stab_kp, d.stab_sps,
+        g_cfg.limit_aktif ? 1 : 0, g_cfg.az_limit, g_cfg.el_min, g_cfg.el_maks,
+        g_cfg.olcum_ekseni[ROL_AZ], g_cfg.olcum_ekseni[ROL_EL],
         (unsigned long)d.dongu_us, (unsigned long)d.asim,
         d.log_acik ? 1 : 0, (unsigned long)d.log_satir,
         (unsigned long)hut_log_dusen(), s_istemci_sayi);

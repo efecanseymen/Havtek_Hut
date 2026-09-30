@@ -74,6 +74,11 @@ typedef struct {
     /* filtre */
     float    q_aci, q_bias, r_olcum;
 
+    /* Hangi eksen hangi IMU acisiyla stabilize edilecek. Varsayilan
+       AZ->yaw, EL->pitch; ama IMU'nun montaj yonune gore degisir, o yuzden
+       "Eksen Tani" bunu olcup yaziyor ve arayuzden elle de secilebiliyor. */
+    uint8_t  olcum_ekseni[ROL_SAYISI];
+
     /* limitler (derece) */
     float    az_limit, el_min, el_maks;
     bool     limit_aktif;

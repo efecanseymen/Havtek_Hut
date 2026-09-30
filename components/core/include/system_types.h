@@ -14,9 +14,9 @@
 /* Ayni anda izlenen en fazla eksen sayisi. */
 #define HUT_MAKS_SURUCU  4
 
-/* Ayar tablosunda yer ayrilan slot: 2 I2C hatti x 4 adres (0x16..0x19).
+/* Ayar tablosunda yer ayrilan slot: 2 I2C hatti x 3 adres (0x16..0x18).
    Iki surucu de 0x16'da olabilecegi icin anahtar sadece adres DEGIL,
-   (hat, adres) ikilisi. */
+   (hat, adres) ikilisi. Boyut 8: slot_no() hat*4+(adres-0x16) kullanir. */
 #define HUT_MAKS_SLOT    8
 
 /* ------------------------------------------------------------------ eksenler */
@@ -46,7 +46,8 @@ typedef enum {
     HATA_LIMIT,            /* yazilim limitine dayandi                     */
     HATA_SAPMA,            /* stabilizasyonda hata siniri asildi           */
     HATA_SURUCU_YOK,       /* istenen eksende surucu yok                   */
-    HATA_ACIL_DURDURMA     /* kullanici acil durdurdu                      */
+    HATA_ACIL_DURDURMA,    /* kullanici acil durdurdu                      */
+    HATA_TERS_YON          /* motor doniyor ama hata buyuyor -> yon ters   */
 } hata_kodu_t;
 
 /* ------------------------------------------------------------------ sensor */
@@ -86,8 +87,18 @@ typedef enum {
     KOMUT_STAB_KILIT,     /* o anki aciyi hedef yap                        */
     KOMUT_PARAM,          /* metin anahtar + c degeri                      */
     KOMUT_LOG,            /* a = 1 ac / 0 kapat                            */
-    KOMUT_YON_TERS        /* a = rol : yonu ters cevir                     */
+    KOMUT_YON_TERS,       /* a = rol : yonu ters cevir                     */
+    KOMUT_LIMIT_OGRET,    /* a = rol, b = 0 alt / 1 ust : burasi limit     */
+    KOMUT_OLCUM_EKSENI    /* a = rol, b = 0 roll / 1 pitch / 2 yaw         */
 } komut_tipi_t;
+
+/* Stabilizasyonun hangi IMU acisini takip ettigi. Mekanik montaj IMU'yu nasil
+   oturttuysa o degisir; varsayim yerine OLCULMESI gerekiyor. */
+typedef enum {
+    OLCUM_ROLL = 0,
+    OLCUM_PITCH = 1,
+    OLCUM_YAW = 2
+} olcum_ekseni_t;
 
 typedef struct {
     komut_tipi_t tip;
