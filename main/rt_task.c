@@ -129,6 +129,14 @@ static uint32_t    s_bastirilan;
 static hata_kodu_t s_son_olay = HATA_YOK;
 static int64_t     s_bastirma_log_us;
 
+/*
+ * Acil durdurma kilidi. Test modunda sistem hicbir hatada durmuyor ve
+ * kilitlenmis hatalari kendiliginden siliyor -- ama ACIL DURDURMA'yi
+ * silmemeli, yoksa operatorun elindeki tek kacis yolu 1 ms sonra
+ * kendiliginden iptal olurdu. Yalnizca "Hatayi Temizle" bunu kaldirir.
+ */
+static bool s_estop_kilidi;
+
 /* manyetometre kalibrasyonu */
 static bool  s_mag_kal;
 static float s_mag_min[3], s_mag_maks[3];
@@ -195,6 +203,7 @@ static void acil_durdur(void)
     s_tani.aktif = false;
     s_mod  = MOD_HATA;
     s_hata = HATA_ACIL_DURDURMA;
+    s_estop_kilidi = true;
 }
 
 static void hataya_dus(hata_kodu_t kod)
@@ -1072,6 +1081,7 @@ static void komut_uygula(const komut_t *k)
     case KOMUT_HATA_SIL:
         s_hata  = HATA_YOK;
         s_uyari = HATA_YOK;
+        s_estop_kilidi = false;
         s_bastirilan = 0;
         s_son_olay   = HATA_YOK;
         s_mod   = MOD_BOSTA;
@@ -1535,6 +1545,28 @@ static void rt_gorev(void *arg)
         komut_t k;
         while (hut_komut_al(&k)) {
             komut_uygula(&k);
+        }
+
+        /*
+         * TEST MODU: hata durumunu her dilimde sil.
+         *
+         * hataya_dus() zaten bastiriliyor, ama iki bosluk kaliyordu:
+         * (a) test modu acilmadan once kilitlenmis hata ekranda duruyordu,
+         * (b) bazi yerler s_hata'yi dogrudan atiyor (surucu yok gibi).
+         * Burada tek noktadan temizlemek ikisini de kapatiyor.
+         *
+         * Acil durdurma haric: o kilit yalnizca "Hatayi Temizle" ile acilir.
+         */
+        if (g_cfg.hata_kapali && !s_estop_kilidi) {
+            if (s_hata != HATA_YOK) {
+                s_bastirilan++;
+                s_son_olay = s_hata;
+                s_hata     = HATA_YOK;
+            }
+            if (s_mod == MOD_HATA) {
+                s_mod = MOD_BOSTA;
+            }
+            s_uyari = HATA_YOK;
         }
 
         if ((sayac % KONTROL_BOLEN) == 0) {
