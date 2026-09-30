@@ -123,12 +123,15 @@ function ciz(d) {
 
   /* sensor */
   const i = d.imu || {};
-  $('#sensor-olcum').textContent =
+  const sensorMetni =
     'roll   ' + f(i.r) + '   pitch ' + f(i.p) + '   yaw ' + f(i.y) + '\n' +
     'gyro   ' + f(i.gx) + ' ' + f(i.gy) + ' ' + f(i.gz) + ' derece/s\n' +
     'ivme   ' + f(i.ax) + ' ' + f(i.ay) + ' ' + f(i.az) + ' g\n' +
     'pusula ' + (i.pusula >= 0 ? f(i.pusula) : 'yok') +
     '   gyro kalibrasyonu: ' + (i.kalibre ? 'yapildi' : 'YAPILMADI');
+
+  $('#sensor-olcum').textContent = sensorMetni;
+  $('#m-sensor').textContent = sensorMetni;
 
   /* --- otomatik mod ozeti --- */
   const o = d.oto || {};
@@ -283,6 +286,43 @@ $('#m-dur').onclick     = () => gonder({ c: 'dur' });
 $('#m-git').onclick     = () => gonder({ c: 'git', rol: +$('#m-rol').value,
                                          derece: +$('#m-derece').value });
 $('#m-ref').onclick     = () => gonder({ c: 'ref', rol: +$('#m-rol').value });
+
+/* --- disli orani sihirbazi --- */
+let dwBaslangicAdim = null;
+
+$('#dw-at').onclick = () => {
+  const rol = +$('#m-rol').value;
+  const eks = (sonDurum && sonDurum.eksen || []).find((e) => e.rol === rol);
+
+  dwBaslangicAdim = eks ? eks.adim : null;
+  gonder({ c: 'git_adim', rol: rol, adim: +$('#dw-adim').value });
+  $('#dw-sonuc').textContent =
+    'adim atiliyor... hareket bitince antenin gercekte kac derece dondugunu\n' +
+    'olcup yukariya yazin, sonra "Orani Hesapla" deyin.';
+};
+
+$('#dw-hesapla').onclick = () => {
+  const rol   = +$('#m-rol').value;
+  const adim  = +$('#dw-adim').value;
+  const olcum = +$('#dw-aci').value;
+
+  if (!olcum) { alert('olculen aciyi girin'); return; }
+
+  /* Motor mili adim basina 0,9 derece doner (yarim adim tablosu).
+     Oran = motor milinin dondugu aci / antenin dondugu aci. */
+  const motorAci = adim * 0.9;
+  const oran     = motorAci / olcum;
+
+  gonder({ c: 'param', k: rol === 0 ? 'reduktor_az' : 'reduktor_el', v: oran });
+
+  $('#dw-sonuc').textContent =
+    'motor mili  ' + motorAci.toFixed(1) + ' derece dondu (' + adim + ' adim)\n' +
+    'anten       ' + olcum.toFixed(2) + ' derece dondu\n' +
+    'ORAN        ' + oran.toFixed(3) + '  -> kaydedildi (' +
+      (rol === 0 ? 'yatay/azimut' : 'dikey/elevasyon') + ')\n' +
+    'adim basina ' + (0.9 / oran).toFixed(4) + ' derece\n' +
+    'tam tur     ' + Math.round(360 / (0.9 / oran)) + ' adim';
+};
 $('#m-serbest').onclick = () => gonder({ c: 'serbest', rol: +$('#m-rol').value });
 
 $('#gyro-kal').onclick    = () => gonder({ c: 'gyro_kalibre' });

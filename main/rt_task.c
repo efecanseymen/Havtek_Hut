@@ -988,6 +988,29 @@ static void komut_uygula(const komut_t *k)
         eksen_git(&s_eksen[i], eksen_derece_adim(k->c, rol_reduktor(k->a)));
         break;
 
+    case KOMUT_GIT_ADIM:
+        /*
+         * Bagil adim: "bulundugun yerden N adim ote git".
+         *
+         * Disli orani sihirbazi bunu kullaniyor. Derece cinsinden komut
+         * vermek burada ise yaramaz, cunku oran henuz BILINMIYOR -- olcmek
+         * icin tam olarak kac adim attigimizi bilmemiz gerekiyor.
+         */
+        i = eksen_bul_rol(k->a);
+        if (i < 0) {
+            s_hata = HATA_SURUCU_YOK;
+            break;
+        }
+        if (s_stab_acik) {
+            mudahale_basla();
+        } else {
+            s_mod = MOD_GIT;
+        }
+        eksen_git(&s_eksen[i], s_eksen[i].adim + k->b);
+        ESP_LOGI(TAG, "%s: %ld bagil adim (olcum icin)", rol_adi(k->a),
+                 (long)k->b);
+        break;
+
     case KOMUT_DUR:
         hepsini_durdur();
         if (s_mod == MOD_JOG || s_mod == MOD_GIT) {

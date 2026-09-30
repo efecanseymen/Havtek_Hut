@@ -90,6 +90,7 @@ typedef enum {
     KOMUT_JOG,            /* a = rol, b = yon(-1/+1), c = adim/s           */
     KOMUT_JOG_DUR,        /* a = rol                                       */
     KOMUT_GIT,            /* a = rol, c = hedef derece                     */
+    KOMUT_GIT_ADIM,       /* a = rol, b = BAGIL adim (disli sihirbazi)     */
     KOMUT_DUR,
     KOMUT_ACIL_DUR,
     KOMUT_HATA_SIL,

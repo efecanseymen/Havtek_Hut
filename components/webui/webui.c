@@ -259,6 +259,10 @@ static bool komut_ayristir(const char *j, komut_t *k)
         k->tip = KOMUT_GIT;
         k->a   = rol_coz(j, "rol");
         k->c   = sayi(j, "derece", 0);
+    } else if (strcmp(komut, "git_adim") == 0) {
+        k->tip = KOMUT_GIT_ADIM;
+        k->a   = rol_coz(j, "rol");
+        k->b   = (int32_t)sayi(j, "adim", 0);
     } else if (strcmp(komut, "dur") == 0) {
         k->tip = KOMUT_DUR;
     } else if (strcmp(komut, "estop") == 0) {
